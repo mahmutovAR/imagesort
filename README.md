@@ -18,11 +18,10 @@ To run application:
 
 "mode" = default, dryrun, copy
 default - sorts images and moves them from the initial folder to the target folder
-dryrun – creates the html repor in the target folder
+dryrun â€“ creates the html repor in the target folder
 copy - sorts images and copies them to the target folder
 
 
 Application works on Python 3.8.0 and up, with next modules:
 PIL (installation required for Python 3.7)
 Chameleon
-
