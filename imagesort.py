@@ -1,5 +1,6 @@
-from chameleon import PageTemplate
+from chameleon import PageTemplateLoader
 from PIL import Image
+import copy
 import hashlib
 import os
 import shutil
@@ -7,26 +8,27 @@ import sys
 
 
 def main():
+    dir_path = os.path.abspath(os.path.dirname(__file__))
     image_types = ['.bmp', '.gif', '.png', '.jpg', '.jpeg', '.tiff', '.raw']
     initial_folder, target_folder, remove_status, dry_run, all_files, images, not_images_status, not_images = input_parameters(image_types)
     images_by_resolutions, not_sized_status, not_sized_files = structure_of_target_folder(initial_folder, images)
     if dry_run:
-        dry_run_report(target_folder, images_by_resolutions, not_images_status, not_images,
+        dry_run_report(dir_path, target_folder, images_by_resolutions, not_images_status, not_images,
                        not_sized_status, not_sized_files)
     else:
         ini_files_sha256 = checksums_in_the_initial_folder(initial_folder, all_files)
-        exception_list = create_folders_and_copy_images(initial_folder, target_folder,
+        exception_dict = create_folders_and_copy_images(initial_folder, target_folder,
                                                         images_by_resolutions, ini_files_sha256)
         if not_images_status:
             create_folder_for_other_files(initial_folder, target_folder,
-                                          not_images, ini_files_sha256, exception_list)
+                                          not_images, ini_files_sha256, exception_dict)
         if not_sized_status:
             create_folder_for_error_files(initial_folder, target_folder,
-                                          not_sized_files, ini_files_sha256, exception_list)
+                                          not_sized_files, ini_files_sha256, exception_dict)
         if remove_status:
             remove_initial_files(initial_folder, all_files)
         checksum_verification(ini_files_sha256, target_folder, images_by_resolutions, not_images_status,
-                              not_images, not_sized_status, not_sized_files, exception_list)
+                              not_images, not_sized_status, not_sized_files, exception_dict)
 
 
 def input_parameters(image_types: list) -> 'main args':
@@ -92,7 +94,7 @@ def input_parameters(image_types: list) -> 'main args':
     return initial_folder, target_folder, remove_status, dry_run, all_files, images, not_images_status, not_images
 
 
-def structure_of_target_folder(initial_folder: str, images: list) -> dict:
+def structure_of_target_folder(initial_folder: str, images: list) -> 'dict, bool, list':
     """Forms the structure of directories with sorted images."""
     os.chdir(initial_folder)
     not_sized_status = False
@@ -101,7 +103,7 @@ def structure_of_target_folder(initial_folder: str, images: list) -> dict:
     for name in images:
         try:
             w, h = Image.open(name).size
-        except Exception:
+        except:
             not_sized_status = True
             not_sized_files.append(name)
         else:
@@ -119,41 +121,29 @@ def structure_of_target_folder(initial_folder: str, images: list) -> dict:
     return images_by_resolutions, not_sized_status, not_sized_files
 
 
-def dry_run_report(target_folder: str, images_by_resolutions: dict,
-                   not_images_status: bool, not_images: list,
-                   not_sized_status: bool, not_sized_files: list) -> 'html':
+def dry_run_report(dir_path: str, target_folder: str, images_by_resolutions: dict, not_images_status: bool,
+                   not_images: list, not_sized_status: bool, not_sized_files: list) -> 'html report':
     """Displays the new structure of the target folder without any action."""
-    template_title = PageTemplate("""<!doctype html>
-<html>
-<head>
-<title> Dry Run report </title>
-</head>
-<body>
-<p> <strong>After sorting the directory "${target_folder}" <br/>
-will contain the next folder(s) and file(s):</strong><br/>
-&nbsp;&nbsp; * if the directory already exists, the files will be added there <br/>
-&nbsp;&nbsp; ** if there are files with the same names, but they are different <br/>
-&nbsp;&nbsp; then the new file will be renamed "!{num}-" will be added to its name. </p>""")
-    template_folder = PageTemplate("<p> <br/><strong>${the_folder}</strong><br/></p>")
-    template_file = PageTemplate("<p> &nbsp;&nbsp; ${the_file} <br/></p>")
-    html_report = open(f'{target_folder}/DryRun.html', 'w')
-    html_report.write(template_title(target_folder=target_folder))
-    for dir_name in sorted(images_by_resolutions.keys()):
-        html_report.write(template_folder(the_folder=dir_name))
-        for file_name in images_by_resolutions[dir_name]:
-            html_report.write(template_file(the_file=file_name))
+    report_name = 'DryRun report'
+    output_files = copy.deepcopy(images_by_resolutions)
     if not_images_status:
-        html_report.write(template_folder(the_folder='Other files'))
-        for file_name in not_images:
-            html_report.write(template_file(the_file=file_name))
+        output_files['Other files'] = not_images
     if not_sized_status:
-        html_report.write(template_folder(the_folder='Error files'))
-        for file_name in not_sized_files:
-            html_report.write(template_file(the_file=file_name))
-    html_report.write("""</body >
-</html>""")
-    html_report.close()
-    print(f'The file "DryRun report.html" was created in the directory "{target_folder}"')
+        output_files['Error files'] = not_sized_files
+    sorted_output_files = {k: output_files[k]
+                           for k in sorted(output_files)}
+
+    try:
+        templates = PageTemplateLoader(os.path.join(dir_path, "templates"))
+        tmpl = templates['report_temp.pt']
+        result_html = tmpl(title=report_name, target_folder=target_folder, structure=sorted_output_files)
+    except:
+        print('The building of the HTML report caused the exception, please check the integrity of the source files')
+    else:
+        report = open(f'{target_folder}/{report_name}.html', 'w')
+        report.write(result_html)
+        report.close()
+        print(f'The file "{report_name}.html" was created in the directory "{target_folder}"')
 
 
 def checksums_in_the_initial_folder(initial_folder: str, all_files: list) -> dict:
@@ -183,7 +173,7 @@ def create_folders_and_copy_images(initial_folder: str, target_folder: str,
 
 
 def create_folder_for_other_files(initial_folder: str, target_folder: str,
-                                  not_images: list, ini_files_sha256: dict, exception_dict: list) -> None:
+                                  not_images: list, ini_files_sha256: dict, exception_dict: dict) -> None:
     """Creates folder for other files and copy them there, if folder already exists files will be added there,
     if there are files with the same names, but they are different,
     then the new file will be renamed, "!{num}-" will be added to its name."""
@@ -196,7 +186,7 @@ def create_folder_for_other_files(initial_folder: str, target_folder: str,
 
 
 def create_folder_for_error_files(initial_folder: str, target_folder: str,
-                                  not_sized_files: list, ini_files_sha256: dict, exception_dict: list) -> None:
+                                  not_sized_files: list, ini_files_sha256: dict, exception_dict: dict) -> None:
     """Creates folder for error files and copy them there, if folder already exists files will be added there,
     if there are files with the same names, but they are different,
     then the new file will be renamed, "!{num}-" will be added to its name."""
@@ -216,7 +206,7 @@ def remove_initial_files(initial_folder: str, all_files: list) -> None:
 
 def checksum_verification(ini_files_sha256: dict, target_folder: str, images_by_resolutions: dict,
                           not_images_status: bool, not_images: list,
-                          not_sized_status: bool, not_sized_files: list, exception_dict: list) -> None:
+                          not_sized_status: bool, not_sized_files: list, exception_dict: dict) -> None:
     """"Gets dict, keys are names of the files and values are checksums.
     Compares checksums before and after reorganization."""
     res_files_sha256 = {}
@@ -273,6 +263,7 @@ def check_file(folder: str, checking_file: str, ini_files_sha256: dict, exceptio
     """Checks existing file to be the same to the new file, if files are different,
     the new file will be renamed, "!{num}-" will be added to its name."""
     existing_file = f'{folder}/{checking_file}'
+    output_file_name = existing_file
     if os.path.isfile(existing_file):
         if ini_files_sha256[checking_file] != getting_checksum(existing_file):
             num = 1

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title> ${title} </title>
+</head>
+<body>
+
+<h2>After sorting the directory "${target_folder}" <br/>
+will contain the next folder(s) and file(s):<br/></h2>
+<p>&nbsp;&nbsp; * if the directory already exists, the files will be added there <br/>
+&nbsp;&nbsp; ** if there are files with the same names, but they are different <br/>
+&nbsp;&nbsp; then the new file will be renamed "!{num}-" will be added to its name.</p>
+<div tal:condition="structure">
+    <DL tal:repeat="folder_name structure">
+        <DT> <B> ${folder_name} </B> </DT> <DD tal:repeat="files structure[folder_name]" tal:content="files" > </DD>
+    </DL>
+</div>
+</body>
+</html>
