@@ -1,5 +1,5 @@
-﻿# ImageSort
-=
+# ImageSort
+
 This application sorts images by their resolutions into the directories named "Width x Height" (for example, "1920x1080")
 
 * if folder already exists files will be added there,
