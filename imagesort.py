@@ -36,20 +36,17 @@ def input_parameters(image_types: list) -> 'main args':
     script, initial_folder, target_folder, add_option = sys.argv
 
     if not os.path.isdir(target_folder):
-        print(f"Error! Entered target folder doesn't exist! \n{target_folder}")
-        sys.exit(0)
+        sys.exit(f"Error! Entered target folder doesn't exist: {target_folder}")
 
     if not os.path.isdir(initial_folder):
-        print(f"Error! Entered initial folder doesn't exist! \n{initial_folder}")
-        sys.exit(0)
+        sys.exit(f"Error! Entered initial folder doesn't exist: {initial_folder}")
 
     all_files = [file_name
                  for file_name in os.listdir(initial_folder)
                  if not os.path.isdir(f'{initial_folder}/{file_name}')]
 
     if not all_files:
-        print(f'Error! There are no files in the initial folder! \n{initial_folder}')
-        sys.exit(0)
+        sys.exit(f'Error! There are no files in the initial folder: {initial_folder}')
 
     images = [file
               for file in all_files
@@ -57,8 +54,7 @@ def input_parameters(image_types: list) -> 'main args':
               if file.endswith(image_format)]
 
     if not images:
-        print(f'Error! There are no images to sort in the initial folder! \n{initial_folder}')
-        sys.exit(0)
+        sys.exit(f'Error! There are no images to sort in the initial folder: {initial_folder}')
 
     remove_status = False
     dry_run = False
@@ -71,8 +67,7 @@ def input_parameters(image_types: list) -> 'main args':
     elif add_option.lower() == "copy":
         program_mode = 'sort image and copy to the target folder'
     else:
-        print('Error! Check mode parameter!', add_option, 'is not correct')
-        sys.exit(0)
+        sys.exit(f'Error! Check mode parameter: "{add_option}" is not correct')
 
     print(f'Input parameters are:\nInitial folder:\t{initial_folder}\nTarget folder:'
           f'\t{target_folder}\nAdditional option:\t{program_mode}\n')
