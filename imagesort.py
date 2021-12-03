@@ -1,62 +1,66 @@
-from chameleon import PageTemplate
+from chameleon import PageTemplateLoader
 from PIL import Image
+import copy
 import hashlib
 import os
 import shutil
+import stat
 import sys
 
 
 def main():
+    dir_path = os.path.abspath(os.path.dirname(__file__))
     image_types = ['.bmp', '.gif', '.png', '.jpg', '.jpeg', '.tiff', '.raw']
-    initial_folder, target_folder, remove_status, dry_run, all_files, images, not_images_status, not_images = input_parameters(image_types)
-    images_by_resolutions, not_sized_status, not_sized_files = structure_of_target_folder(initial_folder, images)
+    initial_folder, target_folder, remove_status, dry_run, all_files, images, not_images_status, not_images = parse_arguments(image_types)
+    images_attributes, images_by_resolutions, not_sized_status, not_sized_files = create_directories_structure(initial_folder, images)
     if dry_run:
-        dry_run_report(target_folder, images_by_resolutions, not_images_status, not_images,
-                       not_sized_status, not_sized_files)
+        generate_html_report(dir_path, target_folder,images_attributes, images_by_resolutions, not_images_status, not_images,
+                             not_sized_status, not_sized_files)
     else:
-        ini_files_sha256 = checksums_in_the_initial_folder(initial_folder, all_files)
-        exception_list = create_folders_and_copy_images(initial_folder, target_folder,
-                                                        images_by_resolutions, ini_files_sha256)
+        exception_dict = sort_images(target_folder, images_attributes, images_by_resolutions)
         if not_images_status:
-            create_folder_for_other_files(initial_folder, target_folder,
-                                          not_images, ini_files_sha256, exception_list)
+            create_named_folder_and_copy_files(target_folder, 'Other files', not_images, exception_dict)
         if not_sized_status:
-            create_folder_for_error_files(initial_folder, target_folder,
-                                          not_sized_files, ini_files_sha256, exception_list)
+            create_named_folder_and_copy_files(target_folder, 'Error files', not_sized_files, exception_dict)
+        validate_checksums(target_folder, all_files, images_attributes, images_by_resolutions, not_images_status,
+                           not_images, not_sized_status, not_sized_files, exception_dict)
         if remove_status:
-            remove_initial_files(initial_folder, all_files)
-        checksum_verification(ini_files_sha256, target_folder, images_by_resolutions, not_images_status,
-                              not_images, not_sized_status, not_sized_files, exception_list)
+            remove_initial_files(initial_folder, target_folder)
 
 
-def input_parameters(image_types: list) -> 'main args':
+def parse_arguments(image_types: list):
     """Gets parameters from CMD, checks them and returns main arguments."""
     script, initial_folder, target_folder, add_option = sys.argv
 
     if not os.path.isdir(target_folder):
-        print(f"Error! Entered target folder doesn't exist! \n{target_folder}")
-        sys.exit(0)
+        sys.exit(f"Error! Entered target folder doesn't exist: {target_folder}")
 
     if not os.path.isdir(initial_folder):
-        print(f"Error! Entered initial folder doesn't exist! \n{initial_folder}")
-        sys.exit(0)
+        sys.exit(f"Error! Entered initial folder doesn't exist: {initial_folder}")
 
-    all_files = [file_name
-                 for file_name in os.listdir(initial_folder)
-                 if not os.path.isdir(f'{initial_folder}/{file_name}')]
+    all_files = get_dirs_and_files(initial_folder)
+    images = {}
+    not_images = {}
 
     if not all_files:
-        print(f'Error! There are no files in the initial folder! \n{initial_folder}')
-        sys.exit(0)
+        sys.exit(f'Error! There are no files in the initial folder: {initial_folder}')
 
-    images = [file
-              for file in all_files
-              for image_format in image_types
-              if file.endswith(image_format)]
+    for dir_path in all_files.keys():
+        images[dir_path] = [file
+                            for file in all_files[dir_path]
+                            for image_format in image_types
+                            if file.lower().endswith(image_format)]
 
+    for dir_path in all_files.keys():
+        not_images[dir_path] = [file
+                                for file in all_files[dir_path]
+                                if file not in images[dir_path]]
+
+    images = delete_empty_folders(images)
+    not_images = delete_empty_folders(not_images)
+    
     if not images:
-        print(f'Error! There are no images to sort in the initial folder! \n{initial_folder}')
-        sys.exit(0)
+        sys.exit(f'Error! There are no images to sort in the initial folder: {initial_folder}')
 
     remove_status = False
     dry_run = False
@@ -69,195 +73,173 @@ def input_parameters(image_types: list) -> 'main args':
     elif add_option.lower() == "copy":
         program_mode = 'sort image and copy to the target folder'
     else:
-        print('Error! Check mode parameter!', add_option, 'is not correct')
-        sys.exit(0)
+        sys.exit(f'Error! Check mode parameter: "{add_option}" is not correct')
 
     print(f'Input parameters are:\nInitial folder:\t{initial_folder}\nTarget folder:'
           f'\t{target_folder}\nAdditional option:\t{program_mode}\n')
-
-    not_images = [file
-                  for file in all_files
-                  if file not in images]
-
-    for folder in os.listdir(initial_folder):
-        if os.path.isdir(f'{initial_folder}/{folder}'):
-            print(f"""Information! There is the directory "{folder}" in the initial folder, it won't be modified.""")
 
     not_images_status = False
     if not_images:
         not_images_status = True
         print(f'Information! There is(are) "not images" file(s) in the initial folder '
               f'so directory "Other files" will be created.')
-
+    
     return initial_folder, target_folder, remove_status, dry_run, all_files, images, not_images_status, not_images
 
 
-def structure_of_target_folder(initial_folder: str, images: list) -> dict:
+def create_directories_structure(initial_folder: str, images: dict):
     """Forms the structure of directories with sorted images."""
     os.chdir(initial_folder)
     not_sized_status = False
-    not_sized_files = []
-    images_and_its_resolutions = {}
-    for name in images:
-        try:
-            w, h = Image.open(name).size
-        except Exception:
-            not_sized_status = True
-            not_sized_files.append(name)
-        else:
-            images_and_its_resolutions[name] = f'{w}x{h}'
+    not_sized_files = {}
+    images_attributes = {}
+    for folder_name in images.keys():
+        for image_name in images[folder_name]:
+            try:
+                w, h = Image.open(f'{folder_name}/{image_name}').size
+            except:
+                not_sized_status = True
+                if folder_name in not_sized_files:
+                    not_sized_files_list = not_sized_files[folder_name]
+                    not_sized_files_list.append(image_name)
+                    not_sized_files[folder_name] = not_sized_files_list
+                else:
+                    not_sized_files[f'{folder_name}'] = [image_name]
+            else:
+                images_attributes[f'{folder_name}/{image_name}'] = [image_name, f'{w}x{h}', calculate_checksums(f'{folder_name}/{image_name}')]
 
     images_by_resolutions = {resolution: [k
-                                          for k, v in images_and_its_resolutions.items()
-                                          if v == resolution]
-                             for resolution in set(images_and_its_resolutions.values())}
+                                          for k, v in images_attributes.items()
+                                          if v[1] == resolution]
+                             for resolution in set([attributes[1]
+                                                    for attributes in images_attributes.values()])}
 
     if not_sized_status:
         print(f"Information! There is(are) file(s) in the initial folder for which resolution couldn't "
               f'be determined so directory "Error files" will be created.\n')
+    
+    return images_attributes, images_by_resolutions, not_sized_status, not_sized_files
 
-    return images_by_resolutions, not_sized_status, not_sized_files
 
-
-def dry_run_report(target_folder: str, images_by_resolutions: dict,
-                   not_images_status: bool, not_images: list,
-                   not_sized_status: bool, not_sized_files: list) -> 'html':
+def generate_html_report(dir_path: str, target_folder: str, images_attributes:dict, images_by_resolutions: dict, not_images_status: bool,
+                         not_images: dict, not_sized_status: bool, not_sized_files: dict) -> 'html':
     """Displays the new structure of the target folder without any action."""
-    template_title = PageTemplate("""<!doctype html>
-<html>
-<head>
-<title> Dry Run report </title>
-</head>
-<body>
-<p> <strong>After sorting the directory "${target_folder}" <br/>
-will contain the next folder(s) and file(s):</strong><br/>
-&nbsp;&nbsp; * if the directory already exists, the files will be added there <br/>
-&nbsp;&nbsp; ** if there are files with the same names, but they are different <br/>
-&nbsp;&nbsp; then the new file will be renamed "!{num}-" will be added to its name. </p>""")
-    template_folder = PageTemplate("<p> <br/><strong>${the_folder}</strong><br/></p>")
-    template_file = PageTemplate("<p> &nbsp;&nbsp; ${the_file} <br/></p>")
-    html_report = open(f'{target_folder}/DryRun.html', 'w')
-    html_report.write(template_title(target_folder=target_folder))
-    for dir_name in sorted(images_by_resolutions.keys()):
-        html_report.write(template_folder(the_folder=dir_name))
-        for file_name in images_by_resolutions[dir_name]:
-            html_report.write(template_file(the_file=file_name))
+    report_name = 'DryRun report'
+    output_files = {resolution: [images_attributes[image][0]
+                                 for image in images_by_resolutions[resolution]]
+                    for resolution in images_by_resolutions.keys()}
     if not_images_status:
-        html_report.write(template_folder(the_folder='Other files'))
-        for file_name in not_images:
-            html_report.write(template_file(the_file=file_name))
+        not_images_list = []
+        for key in not_images:
+            not_images_list += not_images[key]
+        output_files['Other files'] = not_images_list
     if not_sized_status:
-        html_report.write(template_folder(the_folder='Error files'))
-        for file_name in not_sized_files:
-            html_report.write(template_file(the_file=file_name))
-    html_report.write("""</body >
-</html>""")
-    html_report.close()
-    print(f'The file "DryRun report.html" was created in the directory "{target_folder}"')
+        not_sized_files_list = []
+        for key in not_sized_files:
+            not_sized_files_list += not_sized_files[key]
+        output_files['Error files'] = not_sized_files_list
+
+    sorted_output_files = {k: sorted(output_files[k])
+                           for k in sorted(output_files)}
+
+    try:
+        templates = PageTemplateLoader(os.path.join(dir_path, "templates"))
+        tmpl = templates['report_temp.pt']
+        result_html = tmpl(title=report_name, target_folder=target_folder, structure=sorted_output_files)
+    except:
+        print('The building of the HTML report caused the exception, please check the integrity of the source files')
+    else:
+        report = open(f'{target_folder}/{report_name}.html', 'w')
+        report.write(result_html)
+        report.close()
+        print(f'The file "{report_name}.html" was created in the directory "{target_folder}"')
 
 
-def checksums_in_the_initial_folder(initial_folder: str, all_files: list) -> dict:
-    """"Returns dict, keys are names and values are checksums of the files from initial folder."""
-    os.chdir(initial_folder)
-    ini_files_sha256 = {}
-    for file_name in all_files:
-        ini_files_sha256[file_name] = getting_checksum(file_name)
-
-    return ini_files_sha256
-
-
-def create_folders_and_copy_images(initial_folder: str, target_folder: str,
-                                   images_by_resolutions: dict, ini_files_sha256: dict) -> dict:
+def sort_images(target_folder: str, images_attributes: dict, images_by_resolutions: dict) -> dict:
     """Creates new folders (Width x Height) and copies images from initial folder to the new,
     if folder already exists files will be added there, if there are files with the same names,
     but they are different, then the new file will be renamed, "!{num}-" will be added to its name."""
     exception_dict = {}
     os.chdir(target_folder)
-    for folder_name in images_by_resolutions.keys():
-        if not os.path.isdir(folder_name):
-            os.mkdir(folder_name)
-        for image in images_by_resolutions[folder_name]:
-            shutil.copy(f'{initial_folder}/{image}',
-                        f'{target_folder}/{check_file(folder_name, image, ini_files_sha256, exception_dict)}')
+    for resolution in images_by_resolutions.keys():
+        if not os.path.isdir(resolution):
+            os.mkdir(resolution)
+        for image_path in images_by_resolutions[resolution]:
+            coping_status, checked_file_name = check_file_before_coping(target_folder, resolution, image_path, images_attributes[image_path][0], exception_dict)
+            if coping_status:
+                shutil.copy(f'{image_path}', f'{target_folder}/{resolution}/{checked_file_name}')
     return exception_dict
 
 
-def create_folder_for_other_files(initial_folder: str, target_folder: str,
-                                  not_images: list, ini_files_sha256: dict, exception_dict: list) -> None:
-    """Creates folder for other files and copy them there, if folder already exists files will be added there,
+def create_named_folder_and_copy_files(target_folder: str, dir_name: str, input_dict: dict, exception_dict: dict) -> None:
+    """Creates folder for other/error files and copy them there, if folder already exists files will be added there,
     if there are files with the same names, but they are different,
     then the new file will be renamed, "!{num}-" will be added to its name."""
     os.chdir(target_folder)
-    if not os.path.isdir(f'{target_folder}/Other files/'):
-        os.mkdir('Other files')
-    for file_name in not_images:
-        shutil.copy(f'{initial_folder}/{file_name}',
-                    f'{target_folder}/{check_file("Other files", file_name, ini_files_sha256, exception_dict)}')
+    for path_to_file in input_dict.keys():
+        if not os.path.isdir(f'{dir_name}'):
+            os.mkdir(f'{dir_name}')
+        for file_name in input_dict[path_to_file]:
+            coping_status, checked_file_name = check_file_before_coping(target_folder, dir_name, f'{path_to_file}/{file_name}', file_name, exception_dict)
+            if coping_status:
+                    shutil.copy(f'{path_to_file}/{file_name}', f"{target_folder}/{dir_name}/{checked_file_name}")
 
 
-def create_folder_for_error_files(initial_folder: str, target_folder: str,
-                                  not_sized_files: list, ini_files_sha256: dict, exception_dict: list) -> None:
-    """Creates folder for error files and copy them there, if folder already exists files will be added there,
-    if there are files with the same names, but they are different,
-    then the new file will be renamed, "!{num}-" will be added to its name."""
-    os.chdir(target_folder)
-    if not os.path.isdir(f'{target_folder}/Error files/'):
-        os.mkdir('Error files')
-    for file_name in not_sized_files:
-        shutil.copy(f'{initial_folder}/{file_name}',
-                    f'{target_folder}/{check_file("Error files", file_name, ini_files_sha256, exception_dict)}')
-
-
-def remove_initial_files(initial_folder: str, all_files: list) -> None:
-    """Removes all files from initial folder."""
-    for file_name in all_files:
-        os.remove(f'{initial_folder}/{file_name}')
-
-
-def checksum_verification(ini_files_sha256: dict, target_folder: str, images_by_resolutions: dict,
-                          not_images_status: bool, not_images: list,
-                          not_sized_status: bool, not_sized_files: list, exception_dict: list) -> None:
+def validate_checksums(target_folder: str, all_files: dict, images_attributes: dict, images_by_resolutions: dict,
+                       not_images_status: bool, not_images: dict, not_sized_status: bool,
+                       not_sized_files: dict, exception_dict: dict) -> None:
     """"Gets dict, keys are names of the files and values are checksums.
     Compares checksums before and after reorganization."""
-    res_files_sha256 = {}
-    for dir_name in images_by_resolutions.keys():
-        os.chdir(f'{target_folder}/{dir_name}/')
-        for file_name in images_by_resolutions[dir_name]:
+    ini_files_checksums = set()
+    for file_path in all_files.keys():
+        for file_name in all_files[file_path]:
+            ini_files_checksums.add(calculate_checksums(f'{file_path}/{file_name}'))
+
+    res_files_checksums = set()
+    for folder_name in images_by_resolutions.keys():
+        for file_name in images_by_resolutions[folder_name]:
             if file_name in exception_dict.keys():
-                res_files_sha256[exception_dict[file_name]] = getting_checksum(f'{target_folder}/{dir_name}/{exception_dict[file_name]}')
+                checked_file_name = exception_dict[file_name]
             else:
-                res_files_sha256[file_name] = getting_checksum(f'{target_folder}/{dir_name}/{file_name}')
+                checked_file_name = images_attributes[file_name][0]
+            res_files_checksums.add(calculate_checksums(f'{target_folder}/{folder_name}/{checked_file_name}'))
 
     if not_images_status:
-        os.chdir(f'{target_folder}/Other files/')
-        for file_name in not_images:
-            if file_name in exception_dict.keys():
-                res_files_sha256[exception_dict[file_name]] = getting_checksum(f'{target_folder}/Other files/{exception_dict[file_name]}')
-            else:
-                res_files_sha256[file_name] = getting_checksum(f'{target_folder}/Other files/{file_name}')
+        res_files_checksums.update(get_checksum_from_named_folder(target_folder, 'Other files', not_images, exception_dict))
 
     if not_sized_status:
-        os.chdir(f'{target_folder}/Error files/')
-        for file_name in not_sized_files:
-            if file_name in exception_dict.keys():
-                res_files_sha256[exception_dict[file_name]] = getting_checksum(f'{target_folder}/Error files/{exception_dict[file_name]}')
-            else:
-                res_files_sha256[file_name] = getting_checksum(f'{target_folder}/Error files/{file_name}')
-
-    files_total = 0
+        res_files_checksums.update(get_checksum_from_named_folder(target_folder, 'Error files', not_sized_files, exception_dict))
+        
     not_verified = False
-    for file_name in ini_files_sha256.keys():
-        if ini_files_sha256[file_name] == res_files_sha256[file_name]:
-            files_total += 1
-        else:
-            not_verified = True
-    if not_verified:
-        print('Verification completed with error!')
+    if not ini_files_checksums.difference(res_files_checksums):
+        print('Checksum verification completed successfully')
     else:
-        print(f'{files_total} files was(re) verified successfully')
+        print('Attention! Checksum verification completed with an error. Deleting of the initial files canceled.')
+        remove_status = False
+
+    # report:    
+    total_not_images=0
+    for k in not_images.keys():
+        total_not_images+=len(not_images[k])
+    total_not_sized_files=0
+    for k in not_sized_files.keys():
+        total_not_sized_files+=len(not_sized_files[k])
+    total_all_files=0
+    for k in all_files.keys():
+        total_all_files+=len(all_files[k])
+    print(f'Report:\nTotal files in the initial folder\t\t{total_all_files}\nUnique files in the initial folder\t\t{len(ini_files_checksums)}\n'
+          f'Images in the initial folder\t\t\t{len(images_attributes.keys())}\nNot images in the initial folder\t\t{total_not_images}\n'
+          f'Not sized images in the initial folder\t\t{total_not_sized_files}')
+         
+
+def remove_initial_files(initial_folder: str, target_folder: str) -> None:
+    """Removes all files from initial folder."""
+    os.chdir(target_folder)
+    shutil.rmtree(initial_folder)
+    os.mkdir(initial_folder)
 
 
-def getting_checksum(arg_file: str) -> str:
+def calculate_checksums(arg_file: str) -> str:
     """Returns checksum of the inputted file."""
     block_size = 65536
     sha = hashlib.sha256()
@@ -269,23 +251,59 @@ def getting_checksum(arg_file: str) -> str:
     return sha.hexdigest()
 
 
-def check_file(folder: str, checking_file: str, ini_files_sha256: dict, exception_dict: dict) -> str:
+def check_file_before_coping(target_folder: str, dir_name: str, file_to_copy: str,  file_name: str, exception_dict: dict) -> str:
     """Checks existing file to be the same to the new file, if files are different,
     the new file will be renamed, "!{num}-" will be added to its name."""
-    existing_file = f'{folder}/{checking_file}'
+    existing_file = f'{target_folder}/{dir_name}/{file_name}'
+    output_file_name = file_name
+    coping_status = False
     if os.path.isfile(existing_file):
-        if ini_files_sha256[checking_file] != getting_checksum(existing_file):
-            num = 1
-            while os.path.isfile(f'{folder}/!{num}-{checking_file}')\
-                    and ini_files_sha256[checking_file] != getting_checksum(f'{folder}/!{num}-{checking_file}'):
-                num += 1
-            ini_files_sha256[f'!{num}-{checking_file}'] = ini_files_sha256[checking_file]
-            exception_dict[checking_file] = f'!{num}-{checking_file}'
-            del ini_files_sha256[checking_file]
-            output_file_name = f'{folder}/!{num}-{checking_file}'
+        if calculate_checksums(file_to_copy) == calculate_checksums(existing_file):
+            return False, file_name
         else:
-            output_file_name = f'{folder}/{checking_file}'
-    return output_file_name
+            num = 1
+            while os.path.isfile(f'{target_folder}/{dir_name}/!{num}-{file_name}'):
+                if calculate_checksums(file_to_copy) == calculate_checksums(f'{target_folder}/{dir_name}/!{num}-{file_name}'):
+                    return False, file_name
+                else:
+                    num += 1
+            exception_dict[file_to_copy] = f'!{num}-{file_name}'
+            return True, f'!{num}-{file_name}'
+    else:
+        return True, file_name
+
+
+def get_dirs_and_files(folder: str) -> dict:
+    dir_structure = {}
+    for dirpath, dirs, files in os.walk(f'{folder}'):
+        dir_structure[dirpath.replace('\\', '/')] = [file_name
+                                                     for file_name in os.listdir(dirpath)
+                                                     if not os.path.isdir(f'{dirpath}/{file_name}')]
+    dir_structure = delete_empty_folders(dir_structure)
+
+    return dir_structure
+
+
+def delete_empty_folders(input_dict: dict) -> dict:
+    dict_copy = copy.deepcopy(input_dict)
+    for folder_name in dict_copy.keys():
+        if not input_dict[folder_name]:
+            del input_dict[folder_name]
+
+    return input_dict
+
+
+def get_checksum_from_named_folder(target_folder: str, dir_name: str, input_dict: dict, exception_dict: dict) -> set:
+    named_folder_checksums = set()
+    for folder_name in input_dict.keys():
+        for file_name in input_dict[folder_name]:
+            if f'{folder_name}/{file_name}' in exception_dict.keys():
+                checked_file_name = exception_dict[f'{folder_name}/{file_name}']
+            else:
+                checked_file_name = file_name
+            named_folder_checksums.add(calculate_checksums(f'{target_folder}/{dir_name}/{checked_file_name}'))
+
+    return named_folder_checksums
 
 
 main()
