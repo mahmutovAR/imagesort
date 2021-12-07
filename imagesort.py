@@ -4,14 +4,13 @@ import copy
 import hashlib
 import os
 import shutil
-import stat
 import sys
 
 
 def main():
     dir_path = os.path.abspath(os.path.dirname(__file__))
     image_types = ['.bmp', '.gif', '.png', '.jpg', '.jpeg', '.tiff', '.raw']
-    initial_folder, target_folder, remove_status, dry_run, all_files, images, not_images_status, not_images = parse_arguments(image_types)
+    initial_folder, target_folder, folder_rename_status, remove_status, dry_run, all_files, images, not_images_status, not_images = parse_arguments(image_types)
     images_attributes, images_by_resolutions, not_sized_status, not_sized_files = create_directories_structure(initial_folder, images)
     if dry_run:
         generate_html_report(dir_path, target_folder,images_attributes, images_by_resolutions, not_images_status, not_images,
@@ -26,6 +25,8 @@ def main():
                            not_images, not_sized_status, not_sized_files, exception_dict)
         if remove_status:
             remove_initial_files(initial_folder, target_folder)
+        if folder_rename_status:
+            rename_target_folder(initial_folder, target_folder, dir_path)
 
 
 def parse_arguments(image_types: list):
@@ -37,6 +38,17 @@ def parse_arguments(image_types: list):
 
     if not os.path.isdir(initial_folder):
         sys.exit(f"Error! Entered initial folder doesn't exist: {initial_folder}")
+
+    folder_rename_status = False
+    if initial_folder == target_folder and add_option.lower() == 'default':
+        num = 1
+        while os.path.isdir(f'{initial_folder}-temp{num}'):
+            num += 1
+        target_folder = f'{initial_folder}-temp{num}'
+        os.mkdir(target_folder)
+        folder_rename_status = True
+    elif initial_folder == target_folder and add_option.lower() == 'copy':
+        target_folder = initial_folder
 
     all_files = get_dirs_and_files(initial_folder)
     images = {}
@@ -84,7 +96,7 @@ def parse_arguments(image_types: list):
         print(f'Information! There is(are) "not images" file(s) in the initial folder '
               f'so directory "Other files" will be created.')
     
-    return initial_folder, target_folder, remove_status, dry_run, all_files, images, not_images_status, not_images
+    return initial_folder, target_folder, folder_rename_status,  remove_status, dry_run, all_files, images, not_images_status, not_images
 
 
 def create_directories_structure(initial_folder: str, images: dict):
@@ -165,9 +177,8 @@ def sort_images(target_folder: str, images_attributes: dict, images_by_resolutio
         if not os.path.isdir(resolution):
             os.mkdir(resolution)
         for image_path in images_by_resolutions[resolution]:
-            coping_status, checked_file_name = check_file_before_coping(target_folder, resolution, image_path, images_attributes[image_path][0], exception_dict)
-            if coping_status:
-                shutil.copy(f'{image_path}', f'{target_folder}/{resolution}/{checked_file_name}')
+            checked_file_name = check_file_before_coping(target_folder, resolution, image_path, images_attributes[image_path][0], exception_dict)
+            shutil.copy(f'{image_path}', f'{target_folder}/{resolution}/{checked_file_name}')
     return exception_dict
 
 
@@ -180,9 +191,8 @@ def create_named_folder_and_copy_files(target_folder: str, dir_name: str, input_
         if not os.path.isdir(f'{dir_name}'):
             os.mkdir(f'{dir_name}')
         for file_name in input_dict[path_to_file]:
-            coping_status, checked_file_name = check_file_before_coping(target_folder, dir_name, f'{path_to_file}/{file_name}', file_name, exception_dict)
-            if coping_status:
-                    shutil.copy(f'{path_to_file}/{file_name}', f"{target_folder}/{dir_name}/{checked_file_name}")
+            checked_file_name = check_file_before_coping(target_folder, dir_name, f'{path_to_file}/{file_name}', file_name, exception_dict)
+            shutil.copy(f'{path_to_file}/{file_name}', f"{target_folder}/{dir_name}/{checked_file_name}")
 
 
 def validate_checksums(target_folder: str, all_files: dict, images_attributes: dict, images_by_resolutions: dict,
@@ -190,34 +200,36 @@ def validate_checksums(target_folder: str, all_files: dict, images_attributes: d
                        not_sized_files: dict, exception_dict: dict) -> None:
     """"Gets dict, keys are names of the files and values are checksums.
     Compares checksums before and after reorganization."""
-    ini_files_checksums = set()
-    for file_path in all_files.keys():
-        for file_name in all_files[file_path]:
-            ini_files_checksums.add(calculate_checksums(f'{file_path}/{file_name}'))
+    ini_files_checksums = [calculate_checksums(f'{file_path}/{file_name}')
+                           for file_path in all_files.keys()
+                           for file_name in all_files[file_path]]
 
-    res_files_checksums = set()
+    res_files_checksums = []
     for folder_name in images_by_resolutions.keys():
         for file_name in images_by_resolutions[folder_name]:
             if file_name in exception_dict.keys():
                 checked_file_name = exception_dict[file_name]
             else:
                 checked_file_name = images_attributes[file_name][0]
-            res_files_checksums.add(calculate_checksums(f'{target_folder}/{folder_name}/{checked_file_name}'))
+            res_files_checksums.append(calculate_checksums(f'{target_folder}/{folder_name}/{checked_file_name}'))
 
     if not_images_status:
-        res_files_checksums.update(get_checksum_from_named_folder(target_folder, 'Other files', not_images, exception_dict))
+        res_files_checksums.extend(get_checksum_from_named_folder(target_folder, 'Other files', not_images, exception_dict))
 
     if not_sized_status:
-        res_files_checksums.update(get_checksum_from_named_folder(target_folder, 'Error files', not_sized_files, exception_dict))
+        res_files_checksums.extend(get_checksum_from_named_folder(target_folder, 'Error files', not_sized_files, exception_dict))
         
-    not_verified = False
-    if not ini_files_checksums.difference(res_files_checksums):
+    not_verified = True
+    if ini_files_checksums.sort() == res_files_checksums.sort():
+        not_verified = False
         print('Checksum verification completed successfully')
     else:
+        not_verified = True
+
+    if not_verified:
         print('Attention! Checksum verification completed with an error. Deleting of the initial files canceled.')
         remove_status = False
-
-    # report:    
+   
     total_not_images=0
     for k in not_images.keys():
         total_not_images+=len(not_images[k])
@@ -227,16 +239,20 @@ def validate_checksums(target_folder: str, all_files: dict, images_attributes: d
     total_all_files=0
     for k in all_files.keys():
         total_all_files+=len(all_files[k])
-    print(f'Report:\nTotal files in the initial folder\t\t{total_all_files}\nUnique files in the initial folder\t\t{len(ini_files_checksums)}\n'
-          f'Images in the initial folder\t\t\t{len(images_attributes.keys())}\nNot images in the initial folder\t\t{total_not_images}\n'
-          f'Not sized images in the initial folder\t\t{total_not_sized_files}')
+    print(f'"ImageSort" report:\nTotal files in the initial folder\t\t{total_all_files}\nImages in the initial folder\t\t\t{len(images_attributes.keys())}\n'
+          f'Not images in the initial folder\t\t{total_not_images}\nNot sized images in the initial folder\t\t{total_not_sized_files}')
          
 
 def remove_initial_files(initial_folder: str, target_folder: str) -> None:
     """Removes all files from initial folder."""
     os.chdir(target_folder)
     shutil.rmtree(initial_folder)
-    os.mkdir(initial_folder)
+
+
+def rename_target_folder(initial_folder: str, target_folder: str, dir_path: str) -> None:
+    """Renames target folder into initial folder."""
+    os.chdir(dir_path)
+    os.rename(target_folder, initial_folder)
 
 
 def calculate_checksums(arg_file: str) -> str:
@@ -255,22 +271,14 @@ def check_file_before_coping(target_folder: str, dir_name: str, file_to_copy: st
     """Checks existing file to be the same to the new file, if files are different,
     the new file will be renamed, "!{num}-" will be added to its name."""
     existing_file = f'{target_folder}/{dir_name}/{file_name}'
-    output_file_name = file_name
-    coping_status = False
     if os.path.isfile(existing_file):
-        if calculate_checksums(file_to_copy) == calculate_checksums(existing_file):
-            return False, file_name
-        else:
-            num = 1
-            while os.path.isfile(f'{target_folder}/{dir_name}/!{num}-{file_name}'):
-                if calculate_checksums(file_to_copy) == calculate_checksums(f'{target_folder}/{dir_name}/!{num}-{file_name}'):
-                    return False, file_name
-                else:
-                    num += 1
-            exception_dict[file_to_copy] = f'!{num}-{file_name}'
-            return True, f'!{num}-{file_name}'
+        num = 1
+        while os.path.isfile(f'{target_folder}/{dir_name}/!{num}-{file_name}'):
+            num += 1
+        exception_dict[file_to_copy] = f'!{num}-{file_name}'
+        return f'!{num}-{file_name}'
     else:
-        return True, file_name
+        return file_name
 
 
 def get_dirs_and_files(folder: str) -> dict:
@@ -293,15 +301,15 @@ def delete_empty_folders(input_dict: dict) -> dict:
     return input_dict
 
 
-def get_checksum_from_named_folder(target_folder: str, dir_name: str, input_dict: dict, exception_dict: dict) -> set:
-    named_folder_checksums = set()
+def get_checksum_from_named_folder(target_folder: str, dir_name: str, input_dict: dict, exception_dict: dict) -> list:
+    named_folder_checksums = []
     for folder_name in input_dict.keys():
         for file_name in input_dict[folder_name]:
             if f'{folder_name}/{file_name}' in exception_dict.keys():
                 checked_file_name = exception_dict[f'{folder_name}/{file_name}']
             else:
                 checked_file_name = file_name
-            named_folder_checksums.add(calculate_checksums(f'{target_folder}/{dir_name}/{checked_file_name}'))
+            named_folder_checksums.append(calculate_checksums(f'{target_folder}/{dir_name}/{checked_file_name}'))
 
     return named_folder_checksums
 

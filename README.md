@@ -3,7 +3,7 @@
 This application sorts images by their resolutions into the directories named "Width x Height" (for example, "1920x1080").
 
 * if folder already exists files will be added there,
-* if there are files with the same names, but they are different, then the new file will be renamed:
+* if the file with the same names already exists, then the new file will be renamed:
   "!{num}-" will be added to its name (for example, "!3-wallpaper_1.png").
 
 All images from the nested directories in the initial folder will be sorted too.
