@@ -1,6 +1,6 @@
 ﻿# ImageSort
 
-This application sorts images by their resolutions into the directories named "Width x Height" (for example, "1920x1080").
+This script sorts images by their resolutions into the directories named "Width x Height" (for example, "1920x1080").
 
 * if folder already exists files will be added there,
 * if the file with the same names already exists, then the new file will be renamed:
@@ -12,15 +12,18 @@ Files with "not image" format in the initial folder will be copied or moved to t
 Files for which resolution couldn't be determined will be copied or moved to the directory "Error files" in the target folder.
 
 
-## To run application:
-`\..\imagesort.py "initial folder" "target folder" "mode"`
+## To run script:
+`\..\imagesort.py mode "initial folder" "target folder"`
 
-### "mode" = default, dryrun, copy
-* default - sorts images and moves them from the initial folder to the target folder
-* dryrun – creates the html repor in the target folder
-* copy - sorts images and copies them to the target folder
+### mode = dryrun, copy, move, sort
+* dryrun "path" = generates html-report with sorted files structure from inputted folder
+* copy "path_1" "path_2" = sorts files from "directory_1" into "directory_2"
+* move "path_1" "path_2" = sorts and moves files from "directory_1" into "directory_2"
+* sort "path" = sorts files into the inputted folder and deletes the initial files''
 
 
-## Application works on Python >3.8, with next modules:
+## Script runs on Python 3.8, with next modules:
+* `copy`, `hashlib`, `os`, `pathlib`, `stat`, `shutil`, `sys` (standard library)
 * `PIL` (installation required for Python <3.8)
-* `Chameleon` (3rd party module)
+* `Chameleon` (3rd party library)
+* `argparse` (3rd party library)
