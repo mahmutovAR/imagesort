@@ -51,7 +51,7 @@ def parse_arguments(image_types: list, initial_folder: str) -> 'main arguments':
     return all_files, images, not_images
 
 
-def create_directories_structure(initial_folder: str, images: dict) -> 'dict and bool':
+def create_directories_structure(initial_folder: str, images: dict) -> dict and bool:
     """Gets two dictionaries, one with resolutions of each image,
     and second with images for which resolution couldn't be determined.
     images_attributes = {'full_path_to_the_image_1': ['image_name', 'resolution', 'checksum'], ..}
@@ -64,7 +64,7 @@ def create_directories_structure(initial_folder: str, images: dict) -> 'dict and
     for folder_name in images.keys():
         for image_name in images[folder_name]:
             try:
-                w, h = Image.open(f'{folder_name}/{image_name}').size
+                w, h = Image.open(os.path.join(folder_name, image_name)).size
             except:
                 if folder_name in not_sized_files:
                     not_sized_files_list = not_sized_files[folder_name]
@@ -73,9 +73,9 @@ def create_directories_structure(initial_folder: str, images: dict) -> 'dict and
                 else:
                     not_sized_files[f'{folder_name}'] = [image_name]
             else:
-                images_attributes[f'{folder_name}/{image_name}'] = [image_name,
-                                                                    f'{w}x{h}',
-                                                                    calculate_checksums(f'{folder_name}/{image_name}')]
+                images_attributes[os.path.join(folder_name, image_name)] = [image_name,
+                                                                            f'{w}x{h}',
+                                                                            calculate_checksums(os.path.join(folder_name, image_name))]
 
     images_by_resolutions = {resolution: [k
                                           for k, v in images_attributes.items()
@@ -102,20 +102,20 @@ def generate_html_report(script_path: str, initial_folder: str, all_files: dict,
                          for path in all_files.keys()}
 
     output_files = {f'{resolution}': [images_attributes[image][0]
-                                       for image in images_by_resolutions[resolution]]
+                                      for image in images_by_resolutions[resolution]]
                     for resolution in images_by_resolutions.keys()}
 
     if not_images is not None:
         not_images_list = []
         for key in not_images:
             not_images_list += not_images[key]
-        output_files['Other files/'] = not_images_list
+        output_files['Other files'] = not_images_list
 
     if not_sized_files is not None:
         not_sized_files_list = []
         for key in not_sized_files:
             not_sized_files_list += not_sized_files[key]
-        output_files['Error files/'] = not_sized_files_list
+        output_files['Error files'] = not_sized_files_list
 
     sorted_output_files = {k: sorted(output_files[k])
                            for k in sorted(output_files)}
@@ -129,7 +129,7 @@ def generate_html_report(script_path: str, initial_folder: str, all_files: dict,
         print(f'The building of the HTML report caused the exception: {err}'
               f'\nPlease check the integrity of the source files')
     else:
-        report = open(f'{initial_folder}/{report_name}.html', 'w')
+        report = open(os.path.join(initial_folder, report_name) + '.html', 'w')
         report.write(result_html)
         report.close()
         print(f'The file "{report_name}.html" was created in the directory "{initial_folder}"')
@@ -138,7 +138,7 @@ def generate_html_report(script_path: str, initial_folder: str, all_files: dict,
 def sort_images(target_folder: str, images_attributes: dict, images_by_resolutions: dict) -> dict:
     """Creates new folders (Width x Height) and copies images from initial folder to the new,
     if folder already exists files will be added there, if there is file with the same name,
-    then the new file will be renamed, "!{num}-" will be added to its name.
+    then the new file will be renamed, "({num})" will be added to its name.
     exception_dict = {'full_path_to_the_image_1' : 'changed_name_of_the_image_1', ..}
     """
     exception_dict = {}
@@ -148,23 +148,23 @@ def sort_images(target_folder: str, images_attributes: dict, images_by_resolutio
             os.mkdir(resolution)
         for image_path in images_by_resolutions[resolution]:
             checked_file_name = check_file_before_coping(target_folder, resolution, image_path,
-                                                         images_attributes[image_path][0], exception_dict)
-            shutil.copy(f'{image_path}', f'{target_folder}/{resolution}/{checked_file_name}')
+                                                         exception_dict)
+            shutil.copy(f'{image_path}', os.path.join(target_folder, resolution, checked_file_name))
     return exception_dict
 
 
 def create_named_folder_and_copy_files(target_folder: str, dir_name: str,
                                        input_dict: dict, exception_dict: dict) -> None:
     """Creates folder for other/error files and copy them there, if folder already exists files will be added there,
-    if there is file with the same name, then the new file will be renamed, "!{num}-" will be added to its name."""
+    if there is file with the same name, then the new file will be renamed, "({num})" will be added to its name."""
     os.chdir(target_folder)
     for path_to_file in input_dict.keys():
         if not os.path.isdir(f'{dir_name}'):
             os.mkdir(f'{dir_name}')
         for file_name in input_dict[path_to_file]:
             checked_file_name = check_file_before_coping(target_folder, dir_name, f'{path_to_file}/{file_name}',
-                                                         file_name, exception_dict)
-            shutil.copy(f'{path_to_file}/{file_name}', f"{target_folder}/{dir_name}/{checked_file_name}")
+                                                         exception_dict)
+            shutil.copy(os.path.join(path_to_file, file_name), os.path.join(target_folder, dir_name, checked_file_name))
 
 
 def validate_checksums(target_folder: str, all_files: dict, images_attributes: dict, images_by_resolutions: dict,
@@ -173,7 +173,7 @@ def validate_checksums(target_folder: str, all_files: dict, images_attributes: d
     ini_files_checksums = ['checksum_of_the_file_1', 'checksum_of_the_file_2', ..]  # for all files from initial_folder
     res_files_checksums = ['checksum_of_the_file_1', 'checksum_of_the_file_2', ..]  # for all files from target_folder
     """
-    ini_files_checksums = [calculate_checksums(f'{file_path}/{file_name}')
+    ini_files_checksums = [calculate_checksums(os.path.join(file_path, file_name))
                            for file_path in all_files.keys()
                            for file_name in all_files[file_path]]
 
@@ -184,7 +184,7 @@ def validate_checksums(target_folder: str, all_files: dict, images_attributes: d
                 checked_file_name = exception_dict[file_name]
             else:
                 checked_file_name = images_attributes[file_name][0]
-            res_files_checksums.append(calculate_checksums(f'{target_folder}/{folder_name}/{checked_file_name}'))
+            res_files_checksums.append(calculate_checksums(os.path.join(target_folder, folder_name, checked_file_name)))
 
     if not_images is not None:
         res_files_checksums.extend(calculate_checksum_from_named_folder(target_folder, 'Other files',
@@ -264,17 +264,19 @@ def calculate_checksums(arg_file: str) -> str:
 
 
 def check_file_before_coping(target_folder: str, dir_name: str, file_to_copy: str,
-                             file_name: str, exception_dict: dict) -> str:
+                             exception_dict: dict) -> str:
     """Checks folder for existing file with given name, if file already exists then
-    the new file will be renamed before coping, "!{num}-" will be added to its name.
+    the new file will be renamed before coping, "({num})" will be added to its name.
     exception_dict = {'full_path_to_the_image_1' : 'changed_name_of_the_image_1', ..}"""
-    existing_file = f'{target_folder}/{dir_name}/{file_name}'
+    file_name = os.path.basename(file_to_copy)
+    existing_file = os.path.join(target_folder, dir_name, file_name)
+    only_name, only_type = os.path.splitext(file_name)
     if os.path.isfile(existing_file):
         num = 1
-        while os.path.isfile(f'{target_folder}/{dir_name}/!{num}-{file_name}'):
+        while os.path.isfile(os.path.join(target_folder, dir_name, f'{only_name}({num}){only_type}')):
             num += 1
-        exception_dict[file_to_copy] = f'!{num}-{file_name}'
-        return f'!{num}-{file_name}'
+        exception_dict[file_to_copy] = f'{only_name}({num}){only_type}'
+        return f'{only_name}({num}){only_type}'
     else:
         return file_name
 
@@ -287,7 +289,7 @@ def get_dirs_and_files(folder: str) -> dict:
     for dirpath, dirs, files in os.walk(f'{folder}'):
         dir_structure[dirpath] = [file_name
                                   for file_name in os.listdir(dirpath)
-                                  if not os.path.isdir(f'{dirpath}/{file_name}')]
+                                  if not os.path.isdir(os.path.join(dirpath, file_name))]
     dir_structure = delete_empty_folders(dir_structure)
     return dir_structure
 
@@ -309,11 +311,11 @@ def calculate_checksum_from_named_folder(target_folder: str, dir_name: str,
     named_folder_checksums = []
     for folder_name in input_dict.keys():
         for file_name in input_dict[folder_name]:
-            if f'{folder_name}/{file_name}' in exception_dict.keys():
-                checked_file_name = exception_dict[f'{folder_name}/{file_name}']
+            if os.path.join(folder_name, file_name) in exception_dict.keys():
+                checked_file_name = exception_dict[os.path.join(folder_name, file_name)]
             else:
                 checked_file_name = file_name
-            named_folder_checksums.append(calculate_checksums(f'{target_folder}/{dir_name}/{checked_file_name}'))
+            named_folder_checksums.append(calculate_checksums(os.path.join(target_folder, dir_name, checked_file_name)))
     return named_folder_checksums
 
 
@@ -322,7 +324,7 @@ def main():
     Firstly, are given two constant arguments:
         full path to the "imagesort.py"
         list of image types for sorting
-    Secondly, main arguments obtained from the command line by using argparse module:
+    Secondly, main arguments are defined from the command line by using argparse module:
         mode ('dryrun', 'copy', 'move', 'sort')
         initial folder (full path)
         target folder (full path)

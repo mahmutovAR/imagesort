@@ -4,7 +4,7 @@ This script sorts images by their resolutions into the directories named "Width 
 
 * if folder already exists files will be added there,
 * if the file with the same names already exists, then the new file will be renamed:
-  "!{num}-" will be added to its name (for example, "!3-wallpaper_1.png").
+  "({num})" will be added to its name (for example, "wallpaper_1(3).png").
 
 All images from the nested directories in the initial folder will be sorted too.
 
@@ -24,6 +24,5 @@ Files for which resolution couldn't be determined will be copied or moved to the
 
 ## Script runs on Python 3.8, with next modules:
 * `copy`, `hashlib`, `os`, `pathlib`, `stat`, `shutil`, `sys` (standard library)
-* `PIL` (installation required for Python <3.8)
-* `Chameleon` (3rd party library)
-* `argparse` (3rd party library)
+* `Pillow` (installation required for Python <3.8)
+* `argparse`, `Chameleon` (3rd party library)
