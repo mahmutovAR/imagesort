@@ -45,7 +45,7 @@ def parse_arguments(image_types: list, initial_folder: str) -> 'main arguments':
     if not images:
         sys.exit(f'Error! There are no images to sort in the initial folder: {initial_folder}')
 
-    if not_images is not None:
+    if not_images:
         print(f'Information! There is(are) "not images" file(s) in the initial folder '
               f'so directory "Other files" will be created.')
     return all_files, images, not_images
@@ -84,7 +84,7 @@ def create_directories_structure(initial_folder: str, images: dict) -> dict and 
                              for resolution in set([attributes[1]
                                                     for attributes in images_attributes.values()])}
 
-    if not_sized_files is not None:
+    if not_sized_files:
         print(f"Information! There is(are) file(s) in the initial folder for which resolution couldn't "
               f'be determined so directory "Error files" will be created.\n')
     return images_attributes, images_by_resolutions, not_sized_files
@@ -106,13 +106,13 @@ def generate_html_report(script_path: str, initial_folder: str, all_files: dict,
                                       for image in images_by_resolutions[resolution]]
                     for resolution in images_by_resolutions.keys()}
 
-    if not_images is not None:
+    if not_images:
         not_images_list = []
         for key in not_images:
             not_images_list += not_images[key]
         output_files['Other files'] = not_images_list
 
-    if not_sized_files is not None:
+    if not_sized_files:
         not_sized_files_list = []
         for key in not_sized_files:
             not_sized_files_list += not_sized_files[key]
@@ -187,11 +187,11 @@ def validate_checksums(target_folder: str, all_files: dict, images_attributes: d
                 checked_file_name = images_attributes[file_name][0]
             res_files_checksums.append(calculate_checksums(os.path.join(target_folder, folder_name, checked_file_name)))
 
-    if not_images is not None:
+    if not_images:
         res_files_checksums.extend(calculate_checksum_from_named_folder(target_folder, 'Other files',
                                                                         not_images, exception_dict))
 
-    if not_sized_files is not None:
+    if not_sized_files:
         res_files_checksums.extend(calculate_checksum_from_named_folder(target_folder, 'Error files',
                                                                         not_sized_files, exception_dict))
 
@@ -418,9 +418,9 @@ def main():
                 print(f'Information! Target folder "{target_folder}" was created')
 
             exception_dict = sort_images(target_folder, images_by_resolutions)
-            if not_images is not None:
+            if not_images:
                 create_named_folder_and_copy_files(target_folder, 'Other files', not_images, exception_dict)
-            if not_sized_files is not None:
+            if not_sized_files:
                 create_named_folder_and_copy_files(target_folder, 'Error files', not_sized_files, exception_dict)
             validate_checksums(target_folder, all_files, images_attributes, images_by_resolutions,
                                not_images, not_sized_files, exception_dict)
