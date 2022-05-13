@@ -4,12 +4,11 @@ This script sorts images by their resolutions into the directories named "Width 
 
 * if folder already exists files will be added there,
 * if the file with the same names already exists, then the new file will be renamed:
-  "({num})" will be added to its name (for example, "wallpaper(3).png").
+  "({num})" will be added to its name (for example, "wallpaper(3)").
 
 All images from the nested directories in the initial folder will be sorted too.
 
-* Files with "not image" format in the initial folder will be copied or moved to the directory "Other files" in the target folder.
-* Files for which resolution couldn't be determined will be copied or moved to the directory "Error files" in the target folder.
+* Files for which resolution couldn't be determined will be copied or moved to the directory "Not images" in the target folder.
 
 
 ## To run script:
