@@ -5,12 +5,17 @@
     <title> ${title} </title>
 </head>
 <body>
+<h2>The directory "${input_folder}" ("root dir" for short) has following structure:<br/></h2>
+<div tal:condition="initial_dir">
+    <DL tal:repeat="folder_name initial_dir">
+        <DT> <B> ${folder_name} </B> </DT> <DD tal:repeat="files initial_dir[folder_name]" tal:content="files" > </DD>
+    </DL>
 
-<h2>After sorting the directory "${target_folder}" <br/>
-will contain the next folder(s) and file(s):<br/></h2>
+<h2>After sorting files from the directory "${input_folder}" <br/>
+the following folder(s) with attached file(s) will be created:<br/></h2>
 <p>&nbsp;&nbsp; * if the directory already exists, the files will be added there <br/>
-&nbsp;&nbsp; ** if there are files with the same names, but they are different <br/>
-&nbsp;&nbsp; then the new file will be renamed "!{num}-" will be added to its name.</p>
+&nbsp;&nbsp; ** if the file with the same name already exists, then the new file will be renamed <br/>
+&nbsp;&nbsp; "({num})" will be added to its name (for example, "wallpaper(3)").</p>
 <div tal:condition="structure">
     <DL tal:repeat="folder_name structure">
         <DT> <B> ${folder_name} </B> </DT> <DD tal:repeat="files structure[folder_name]" tal:content="files" > </DD>
