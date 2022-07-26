@@ -15,12 +15,12 @@ All images from the nested directories in the initial folder will be sorted too.
 `\..\imagesort.py mode "initial folder" "target folder"`
 
 ### mode = dryrun, copy, move, sort
-* `dryrun "path"` generates html-report with sorted files structure from inputted folder
-* `copy "path_1" "path_2"` sorts files from "directory_1" into "directory_2"
-* `move "path_1" "path_2"` sorts and moves files from "directory_1" into "directory_2"
-* `sort "path"` sorts files into the inputted folder and deletes the initial files
+* `dryrun "initial_dir" "report_dir"` sorts files from "ini_dir" and generates html report in "report_dir"
+* `copy "initial_dir" "target_dir"` sorts and copies files from "initial_dir" into "target_dir"
+* `move "initial_dir" "target_dir"` sorts and moves files from "initial_dir" into "target_dir"
+* `sort "initial_dir"` sorts files into "initial_dir" and deletes the initial files
 
 
-## Script runs on Python 3.8, with next modules:
-* `copy`, `hashlib`, `os`, `pathlib`, `shutil`, `stat`, `sys` (standard library)
+## Script runs on Python 3.9, with next modules:
+* `hashlib`, `os`, `pathlib`, `shutil`, `stat`, `sys` (standard library)
 * `argparse`, `Chameleon`, `Pillow`  (3rd party library)
