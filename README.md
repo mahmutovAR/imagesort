@@ -1,14 +1,16 @@
 ﻿# ImageSort
 
-This script sorts images by their resolutions into the directories named "Width x Height" (for example, "1920x1080").
+This script sorts images by their resolutions from the INITIAL folder to the TARGET folder.
+In the target folder new directories named "Width x Height" (for example, "1920x1080") will be created.
 
-* if folder already exists files will be added there,
-* if the file with the same names already exists, then the new file will be renamed:
-  "({num})" will be added to its name (for example, "wallpaper(3)").
+* if target folder doesn't exist then it will be created;
+* if folder already exists files will be added there;
+* if the file with the same name already exists, then the new file will be renamed:
+  "({number})" will be added to its name (for example, "wallpaper(3)").
 
 All images from the nested directories in the initial folder will be sorted too.
 
-* Files for which resolution couldn't be determined will be copied or moved to the directory "Not images" in the target folder.
+* files for which resolution couldn't be determined will be copied or moved to the directory "Not images" in the target folder.
 
 
 ## To run script:
@@ -22,5 +24,8 @@ All images from the nested directories in the initial folder will be sorted too.
 
 
 ## Script runs on Python 3.9, with next modules:
-* `hashlib`, `os`, `pathlib`, `shutil`, `stat`, `sys` (standard library)
-* `argparse`, `Chameleon`, `Pillow`  (3rd party library)
+* `hashlib`, `os`, `pathlib`, `shutil`, `stat`, `sys` (standard libraries)
+* `argparse`, `Chameleon`, `Pillow`  (3rd party libraries)
+
+### The 'imagesort_tests.py' tests ImageSort
+* `bs4`, `json`,`tempfile`, `unittest` additionally are used for testing
