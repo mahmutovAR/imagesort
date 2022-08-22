@@ -1,14 +1,14 @@
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from bs4 import BeautifulSoup
 from os import walk as os_walk
-from os import chmod, mkdir, remove, rename
+from os import mkdir
 from os.path import abspath, dirname
 from os.path import join as os_path_join
 from pathlib import Path
-from shutil import rmtree, copytree
-from stat import S_IWRITE
+from shutil import copytree
 from sys import exit as sys_exit
 from tempfile import TemporaryDirectory
+from ims_test_errors import TestFailedError
 import imagesort
 import json
 import unittest
@@ -16,23 +16,12 @@ import argparse
 
 
 SCRIPT_PATH = abspath(dirname(__file__))
-BASE_DIR = Path(__file__).resolve().parent.parent
-CONTROL_REPORT = os_path_join(BASE_DIR, 'for testing imagesort', 'reference report.html')
-CONTROL_STRUCTURE = os_path_join(BASE_DIR, 'for testing imagesort', 'reference structure.json')
+BASE_DIR = Path(__file__).resolve().parent
+CONTROL_REPORT = os_path_join(BASE_DIR, 'reference report and structure', 'control report.html')
+CONTROL_STRUCTURE = os_path_join(BASE_DIR, 'reference report and structure', 'control structure.json')
 
-TEMP_FOLDER = os_path_join(BASE_DIR, 'for testing imagesort', 'unsorted (template)')
-INITIAL_FOLDER = os_path_join(BASE_DIR, 'for testing imagesort', 'unsorted')
-
-
-class TestFailedError(Exception):
-    __slots__ = ['__test_name']
-
-    def __init__(self, test_name):
-        self.__test_name = test_name
-        self.__description = f'Error! Test {test_name} failed.'
-
-    def __str__(self):
-        return f'{self.__description}'
+TEMP_FOLDER = os_path_join(BASE_DIR, 'unsorted')
+INITIAL_FOLDER = os_path_join(BASE_DIR, 'test INI DIR')
 
 
 def simulate_argparse(input_args: list) -> 'argparse.Namespace':
@@ -60,23 +49,6 @@ def create_initial_folder(copy_from: str, copy_to: str) -> None:
         copytree(copy_from, copy_to)
     except Exception as err:
         sys_exit(f"Error! Testing aborted, the exception was raised: {err}")
-
-
-def delete_folder(folder_for_deleting: str) -> None:
-    """Deletes given folder with all nested folder(s) and file(s)."""
-    try:
-        rmtree(folder_for_deleting, onerror=delete_readonly_file)
-    except PermissionError as err:
-        sys_exit(f'Attention! Deleting of the "{folder_for_deleting}" raised the exception: {err}'
-                 f'\nPlease close the folder in explorer or another application and try again')
-    except Exception as err:
-        sys_exit(f'Attention! Deleting of the "{folder_for_deleting}" raised the exception: {err}')
-
-
-def delete_readonly_file(action, name, exc) -> None:
-    """Deletes files with attribute "readonly"."""
-    chmod(name, S_IWRITE)
-    remove(name)
 
 
 def get_reference_data() -> dict:
@@ -200,7 +172,7 @@ class ImagesortTest(unittest.TestCase):
             raise TestFailedError('SORT mode')
 
     def tearDown(self):
-        delete_folder(INITIAL_FOLDER)
+        imagesort.delete_folder(INITIAL_FOLDER)
 
 
 if __name__ == '__main__':

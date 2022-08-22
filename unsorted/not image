@@ -1,0 +1,4 @@
+
+This module provides a simple way to time small bits of Python code. It has both a Command-Line Interface as well as a callable one. It avoids a number of common traps for measuring execution times. See also Tim Peters’ introduction to the “Algorithms” chapter in the second edition of Python Cookbook, published by O’Reilly.
+
+end..

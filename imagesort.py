@@ -3,101 +3,20 @@ from chameleon import PageTemplateLoader
 from hashlib import sha256
 from os import chmod, mkdir, remove, rename
 from os import walk as os_walk
-from os.path import abspath, basename, dirname, isdir, isfile, splitext
+from os.path import abspath, dirname, isdir, isfile, splitext
 from os.path import join as os_path_join
 from pathlib import Path
-from PIL import Image
 from shutil import copy as shutil_copy
 from shutil import rmtree
 from stat import S_IWRITE
 from sys import exit as sys_exit
+from ims_class import ImageAttributes
+from ims_errors import ArgParsingError, ChecksumVerificationError, FolderNotFoundError, NoFilesToSortError
+
 
 # global variables:
-SCRIPT_PATH = abspath(dirname(__file__))  # SCRIPT_PATH = Path(__file__).resolve().parent
+SCRIPT_PATH = abspath(dirname(__file__))
 SHA256_BLOCK_SIZE = 65536
-
-
-class FileAttributes:
-    __slots__ = ['__initial_file_full_path', '__folder_name_for_sorted_file', '__sorted_file_path']
-
-    def __init__(self, initial_file_full_path):
-        self.__initial_file_full_path = initial_file_full_path
-        self.__folder_name_for_sorted_file = 'not sorted'
-        self.__sorted_file_path = 'no path'
-
-    def set_initial_full_path(self, initial_file_full_path) -> None:
-        self.__initial_file_full_path = initial_file_full_path
-
-    def return_initial_file_path(self) -> str:
-        return self.__initial_file_full_path
-
-    def get_folder_name_for_sorted_file(self) -> None:
-        try:
-            with Image.open(self.__initial_file_full_path) as image_to_size:
-                w, h = image_to_size.size
-        except:
-            self.__folder_name_for_sorted_file = 'Not images'
-        else:
-            self.__folder_name_for_sorted_file = f'{w}x{h}'
-
-    def return_folder_name_for_sorted_file(self) -> str:
-        return self.__folder_name_for_sorted_file
-
-    def get_path_for_sorted_file(self) -> None:
-        initial_file_name = basename(self.__initial_file_full_path)
-        sorted_file_path = os_path_join(TARGET_FOLDER,
-                                        self.return_folder_name_for_sorted_file(), initial_file_name)
-        if isfile(sorted_file_path):
-            num = 1
-            file_path_without_type, file_type = splitext(sorted_file_path)
-            while isfile(os_path_join(f'{file_path_without_type}({num}){file_type}')):
-                num += 1
-            new_sorted_file_path = f'{file_path_without_type}({num}){file_type}'
-            self.__sorted_file_path = new_sorted_file_path
-        else:
-            self.__sorted_file_path = sorted_file_path
-
-    def return_sorted_file_path(self) -> str:
-        return self.__sorted_file_path
-
-
-class FolderNotFoundError(Exception):
-    __slots__ = ['__folder_name']
-
-    def __init__(self, folder_name):
-        self.__folder_name = folder_name
-        self.__description = f"""Error! This folder doesn't exist: {self.__folder_name}"""
-
-    def __str__(self):
-        return f'{self.__description}'
-
-
-class NoFilesToSortError(Exception):
-    __slots__ = ['__folder_name']
-
-    def __init__(self, folder_name):
-        self.__folder_name = folder_name
-        self.__description = f'Error! There are no files to sort in the folder: {self.__folder_name}'
-
-    def __str__(self):
-        return f'{self.__description} {self.__folder_name}'
-
-
-class ChecksumVerificationError(Exception):
-    def __init__(self):
-        self.__description = 'Error! Checksum verification completed with an error. ' \
-                             'Deleting of the initial files canceled.'
-
-    def __str__(self):
-        return f'{self.__description}'
-
-
-class ArgParsingError(Exception):
-    def __init__(self):
-        self.__description = f'Error! The required argument(s) was(re) not entered'
-
-    def __str__(self):
-        return f'{self.__description}'
 
 
 def parse_main_args() -> 'argparse.Namespace':
@@ -115,7 +34,7 @@ def parse_main_args() -> 'argparse.Namespace':
     parser.add_argument('script_mode', type=str, help='Choose the mode',
                         choices=['dryrun', 'copy', 'move', 'sort'])
     parser.add_argument('initial_folder', type=Path, help='Input the initial folder', nargs='?', default=None)
-    parser.add_argument('target_folder', type=Path, help='Input the auxiliary folder', nargs='?', default=None)
+    parser.add_argument('target_folder', type=Path, help='Input the target folder', nargs='?', default=None)
     return parser.parse_args()
 
 
@@ -144,14 +63,14 @@ def convert_path_to_str(input_data: 'pathlib.PosixPath') -> str:
         return output_path
 
 
-def get_files_and_attributes_from_initial_dir() -> list and dict:
+def get_files_to_sort_from_initial_dir() -> list and dict:
     """Returns list of objects FileAttributes class."""
-    files_from_initial_folder, ini_dir_structure = get_all_files_from_folder(INITIAL_FOLDER)
+    all_files_from_ini_folder, ini_dir_structure = get_all_files_from_folder(INITIAL_FOLDER)
 
-    ini_files_attributes = [FileAttributes(file_to_sort)
-                            for file_to_sort in files_from_initial_folder]
+    initial_files_to_sort = [ImageAttributes(file_to_sort)
+                             for file_to_sort in all_files_from_ini_folder]
 
-    return ini_files_attributes, ini_dir_structure
+    return initial_files_to_sort, ini_dir_structure
 
 
 def get_all_files_from_folder(given_folder: str) -> list and dict:
@@ -173,23 +92,22 @@ def get_all_files_from_folder(given_folder: str) -> list and dict:
         return full_paths_from_dir, dir_structure
 
 
-def get_folder_names_for_sorted_files(ini_files_attributes: list) -> None:
-    """Runs function "get_folder_name_for_sorted_file" for each file from initial folder."""
+def define_resolution_for_each_image(ini_files_attributes: list) -> None:
+    """Runs function "get_resolution_of_image" of the class ImageAttributes for each file from initial folder."""
     for file_to_sort in ini_files_attributes:
-        file_to_sort.get_folder_name_for_sorted_file()
+        file_to_sort.define_image_resolution()
 
 
-def generate_html_report(ini_files_attributes: list, files_before_sorting: dict) -> 'html report':
+def generate_html_report(initial_files: list, files_before_sorting: dict) -> 'html report':
     """Generates the html report which shows current structure and suggested reorganization.
     The html report will be created in the given directory.
     """
     html_report_name = choose_name_for_html_report(TARGET_FOLDER)
 
     files_after_sorting = dict()
-    for file_to_sort in ini_files_attributes:
-        full_path = file_to_sort.return_initial_file_path()
-        file_name = basename(full_path)
-        folder_name = file_to_sort.return_folder_name_for_sorted_file()
+    for file_to_sort in initial_files:
+        file_name = file_to_sort.get_file_name()
+        folder_name = file_to_sort.get_image_resolution()
         if folder_name not in files_after_sorting.keys():
             files_after_sorting[folder_name] = list()
         files_after_sorting[folder_name].append(file_name)
@@ -205,7 +123,7 @@ def generate_html_report(ini_files_attributes: list, files_before_sorting: dict)
         data_for_html = tmpl(title=html_report_name, input_folder=INITIAL_FOLDER,
                              initial_dir=files_before_sorting, structure=sorted_output_files)
     except Exception as err:
-        print(f'The HTML report generation caused the exception:\n{err}')
+        print(f'The HTML report generation raised the exception:\n{err}')
     else:
         report = open(os_path_join(TARGET_FOLDER, html_report_name), 'w')
         report.write(data_for_html)
@@ -225,18 +143,35 @@ def choose_name_for_html_report(given_folder: str) -> str:
         return 'DryRun report.html'
 
 
-def copy_sorted_files(ini_files_attributes: list) -> None:
+def sort_and_copy_files(initial_files: list) -> None:
     """Creates new folders (Width x Height) or 'Not images' and copies files from initial folder to the new one,
     if folder already exists files will be added there, if there is file with the same name,
     then the new file will be renamed, "({num})" will be added to its name (for example, "wallpaper(3)").
     """
-    for file_to_sort in ini_files_attributes:
-        initial_file_path = file_to_sort.return_initial_file_path()
-        folder_to_copy_file = os_path_join(TARGET_FOLDER, file_to_sort.return_folder_name_for_sorted_file())
-        create_dir_if_not_exists(folder_to_copy_file)
-        file_to_sort.get_path_for_sorted_file()
-        path_for_sorted_file = file_to_sort.return_sorted_file_path()
-        shutil_copy(initial_file_path, path_for_sorted_file)
+    for file_from_ini_dir in initial_files:
+        initial_file_path = file_from_ini_dir.get_initial_file_path()
+        initial_file_name = file_from_ini_dir.get_file_name()
+        image_resolution = file_from_ini_dir.get_image_resolution()
+        create_dir_if_not_exists(os_path_join(TARGET_FOLDER, image_resolution))
+        file_to_sort = get_path_for_sorted_file(initial_file_name, image_resolution)
+        file_from_ini_dir.set_sorted_file_path(file_to_sort)
+        shutil_copy(initial_file_path, file_to_sort)
+
+
+def get_path_for_sorted_file(file_name: str, folder_name: str) -> str:
+    """Returns file name for sorted file in target folder.
+    If file with the same name already exists, then the new file will be renamed:
+    "({number})" will be added to its name (for example, "wallpaper(3)")."""
+    sorted_file_path = os_path_join(TARGET_FOLDER, folder_name, file_name)
+    if isfile(sorted_file_path):
+        num = 1
+        file_path_without_type, file_type = splitext(sorted_file_path)
+        while isfile(os_path_join(f'{file_path_without_type}({num}){file_type}')):
+            num += 1
+        new_sorted_file_path = f'{file_path_without_type}({num}){file_type}'
+        return new_sorted_file_path
+    else:
+        return sorted_file_path
 
 
 def create_dir_if_not_exists(given_path: str) -> None:
@@ -252,11 +187,11 @@ def integrity_validation(ini_files_attributes: list) -> None:
     total_images = 0
     total_not_images = 0
     for file_to_sort in ini_files_attributes:
-        initial_file = file_to_sort.return_initial_file_path()
-        sorted_file = file_to_sort.return_sorted_file_path()
+        initial_file = file_to_sort.get_initial_file_path()
+        sorted_file = file_to_sort.get_sorted_file_path()
         if get_checksum(initial_file) != get_checksum(sorted_file):
             raise ChecksumVerificationError
-        if file_to_sort.return_folder_name_for_sorted_file() == 'Not images':
+        if file_to_sort.get_image_resolution() == 'Not images':
             total_not_images += 1
         else:
             total_images += 1
@@ -324,8 +259,8 @@ def main(CLI_data: 'argparse.Namespace'):
             target folder (full path)
 
     After thees blocks are executed next functions:
-    - get_files_and_attributes_from_initial_dir()
-    - get_folder_names_for_sorted_files(initial_files_attributes)
+    - get_files_to_sort_from_initial_dir()
+    - define_resolution_for_each_image(initial_files_to_sort)
 
     For 'dryrun' mode is executed:
         generate_html_report()
@@ -345,34 +280,34 @@ def main(CLI_data: 'argparse.Namespace'):
     """
 
     get_global_variables(CLI_data)
-    initial_files_attributes, initial_dir_structure = get_files_and_attributes_from_initial_dir()
-    get_folder_names_for_sorted_files(initial_files_attributes)
+    initial_files_to_sort, initial_dir_structure = get_files_to_sort_from_initial_dir()
+    define_resolution_for_each_image(initial_files_to_sort)
 
     if MODE == 'dryrun':
-        generate_html_report(initial_files_attributes, initial_dir_structure)
+        generate_html_report(initial_files_to_sort, initial_dir_structure)
     elif MODE == 'copy':
-        process_mode_copy(initial_files_attributes)
+        process_mode_copy(initial_files_to_sort)
     elif MODE == 'move':
-        process_mode_move(initial_files_attributes)
+        process_mode_move(initial_files_to_sort)
     else:  # MODE == 'sort':
-        process_mode_sort(initial_files_attributes)
+        process_mode_sort(initial_files_to_sort)
 
 
 # mode function definitions:
-def process_mode_copy(ini_files_attributes):
-    copy_sorted_files(ini_files_attributes)
-    integrity_validation(ini_files_attributes)
+def process_mode_copy(initial_files):
+    sort_and_copy_files(initial_files)
+    integrity_validation(initial_files)
 
 
-def process_mode_move(ini_files_attributes):
-    copy_sorted_files(ini_files_attributes)
-    integrity_validation(ini_files_attributes)
+def process_mode_move(initial_files):
+    sort_and_copy_files(initial_files)
+    integrity_validation(initial_files)
     delete_folder(INITIAL_FOLDER)
 
 
-def process_mode_sort(ini_files_attributes):
-    copy_sorted_files(ini_files_attributes)
-    integrity_validation(ini_files_attributes)
+def process_mode_sort(initial_files):
+    sort_and_copy_files(initial_files)
+    integrity_validation(initial_files)
     delete_folder(INITIAL_FOLDER)
     rename_temp_folder_to_initial()
 

@@ -22,10 +22,23 @@ All images from the nested directories in the initial folder will be sorted too.
 * `move "initial_dir" "target_dir"` sorts and moves files from "initial_dir" into "target_dir"
 * `sort "initial_dir"` sorts files into "initial_dir" and deletes the initial files
 
+### Files and directories:
+* `imagesort.py` script for sorting images by resolutions
+* `ims_class.py` module with main class for imagesort.py
+* `ims_errors.py` module with exceptions for imagesort.py
+* `imagesort_tests.py` script for testing imagesort.py
+* `ims_test_errors.py` module with exceptions for imagesort_tests.py
+* `./reference report and structure`
+* * `control report.html` reference html report for testing
+* * `control structure.json` json file with reference directory structure for testing
+* `./templates`
+* * `report_temp.pt` template of html report
+* `./unsorted` directory with files for testing
 
 ## Script runs on Python 3.9, with next modules:
 * `hashlib`, `os`, `pathlib`, `shutil`, `stat`, `sys` (standard libraries)
 * `argparse`, `Chameleon`, `Pillow`  (3rd party libraries)
 
-### The 'imagesort_tests.py' tests ImageSort
-* `bs4`, `json`,`tempfile`, `unittest` additionally are used for testing
+### Test of ImageSort runs with next modules:
+* `json`,`tempfile`, `unittest` (standard libraries)
+* `bs4` (3rd party library)
