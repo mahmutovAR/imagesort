@@ -3,7 +3,7 @@ from chameleon import PageTemplateLoader
 from hashlib import sha256
 from os import chmod, mkdir, remove, rename
 from os import walk as os_walk
-from os.path import abspath, dirname, isdir, isfile, splitext
+from os.path import abspath, dirname, isdir, isfile, normpath, splitext
 from os.path import join as os_path_join
 from pathlib import Path
 from shutil import copy as shutil_copy
@@ -11,7 +11,8 @@ from shutil import rmtree
 from stat import S_IWRITE
 from sys import exit as sys_exit
 from ims_class import ImageAttributes
-from ims_errors import ArgParsingError, ChecksumVerificationError, FolderNotFoundError, NoFilesToSortError
+from ims_errors import ArgParsingError, ChecksumVerificationError,\
+    InitialFolderNotFoundError, NoFilesToSortError, TargetFolderIsRelativeToInitialFolderError
 
 
 # global variables:
@@ -43,11 +44,15 @@ def get_global_variables(CLI_data: 'argparse.Namespace') -> None:
     global MODE, INITIAL_FOLDER, TARGET_FOLDER
     MODE = CLI_data.script_mode
     INITIAL_FOLDER = convert_path_to_str(CLI_data.initial_folder)
+    if not isdir(INITIAL_FOLDER):
+        raise InitialFolderNotFoundError(INITIAL_FOLDER)
 
     if MODE == 'sort':
         TARGET_FOLDER = create_temporary_folder()
     else:
         TARGET_FOLDER = convert_path_to_str(CLI_data.target_folder)
+        check_target_folder_to_be_out_of_initial_folder(INITIAL_FOLDER, TARGET_FOLDER)
+        create_target_folder(TARGET_FOLDER)
 
 
 def convert_path_to_str(input_data: 'pathlib.PosixPath') -> str:
@@ -57,10 +62,29 @@ def convert_path_to_str(input_data: 'pathlib.PosixPath') -> str:
     if not input_data:
         raise ArgParsingError
     output_path = str(input_data)
-    if not isdir(output_path):
-        raise FolderNotFoundError(output_path)
-    else:
-        return output_path
+    return normpath(output_path)
+
+
+def check_target_folder_to_be_out_of_initial_folder(initial_folder: str, target_folder: str) -> None:
+    """Checks the target folder to be out of the initial folder."""
+    initial_dir = normpath(initial_folder)
+    target_dir = normpath(target_folder)
+    initial_dir = Path(initial_dir)
+    target_dir = Path(target_dir)
+    if target_dir.is_relative_to(initial_dir):
+        raise TargetFolderIsRelativeToInitialFolderError(initial_folder, target_folder)
+
+
+def create_target_folder(given_path: str) -> None:
+    """Creates target folder"""
+    path_in_list = given_path.split('/')
+    for cnt, path_part in enumerate(path_in_list, 1):
+        folder_to_create = normpath('/'.join(path_in_list[:cnt]))
+        if not isdir(folder_to_create):
+            try:
+                mkdir(folder_to_create)
+            except PermissionError as err:
+                sys_exit(f'\nAttention! Creating of the "{folder_to_create}" raised the PermissionError: {err}')
 
 
 def get_files_to_sort_from_initial_dir() -> list and dict:
@@ -123,12 +147,12 @@ def generate_html_report(initial_files: list, files_before_sorting: dict) -> 'ht
         data_for_html = tmpl(title=html_report_name, input_folder=INITIAL_FOLDER,
                              initial_dir=files_before_sorting, structure=sorted_output_files)
     except Exception as err:
-        print(f'The HTML report generation raised the exception:\n{err}')
+        sys_exit(f'\nThe HTML report generation raised the exception:\n{err}')
     else:
         report = open(os_path_join(TARGET_FOLDER, html_report_name), 'w')
         report.write(data_for_html)
         report.close()
-        print(f'The file "{html_report_name}" was created in the directory "{TARGET_FOLDER}"')
+        print(f'\nThe file "{html_report_name}" was created in the directory "{TARGET_FOLDER}"')
 
 
 def choose_name_for_html_report(given_folder: str) -> str:
@@ -195,7 +219,7 @@ def integrity_validation(ini_files_attributes: list) -> None:
             total_not_images += 1
         else:
             total_images += 1
-    print(f'Checksum verification completed successfully\n'
+    print(f'\nChecksum verification completed successfully\n'
           f'From initial folder was(re) sorted successfully {total_ini_files} files:\n'
           f'Images{total_images:>20}\n'
           f'Not images{total_not_images:>16}')
@@ -217,10 +241,10 @@ def delete_folder(folder_for_deleting: str) -> None:
     try:
         rmtree(folder_for_deleting, onerror=delete_readonly_file)
     except PermissionError as err:
-        sys_exit(f'Attention! Deleting of the "{folder_for_deleting}" raised the exception: {err}'
+        sys_exit(f'\nAttention! Deleting of the "{folder_for_deleting}" raised the exception: {err}'
                  f'\nPlease close the folder in explorer or another application and try again')
     except Exception as err:
-        sys_exit(f'Attention! Deleting of the "{folder_for_deleting}" raised the exception: {err}')
+        sys_exit(f'\nAttention! Deleting of the "{folder_for_deleting}" raised the exception: {err}')
 
 
 def delete_readonly_file(action, name, exc) -> None:

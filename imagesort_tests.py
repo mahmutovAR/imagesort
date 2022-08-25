@@ -1,8 +1,8 @@
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
+from argparse import ArgumentParser
 from bs4 import BeautifulSoup
 from os import walk as os_walk
 from os import mkdir
-from os.path import abspath, dirname
+from os.path import abspath, dirname, isdir
 from os.path import join as os_path_join
 from pathlib import Path
 from shutil import copytree
@@ -25,20 +25,11 @@ INITIAL_FOLDER = os_path_join(BASE_DIR, 'test INI DIR')
 
 
 def simulate_argparse(input_args: list) -> 'argparse.Namespace':
-    test_parser = ArgumentParser(prog='ImageSort',
-                                 usage='imagesort.py [-h] [script_mode, initial_folder, target_folder]',
-                                 formatter_class=RawDescriptionHelpFormatter,
-                                 description='''
-        %(prog)s sorts images by their resolutions.
-        Reference information about application:
-          dryrun "initial_dir" "report_dir" = app sorts files from "ini_dir" and generates html report in "report_dir"
-          copy "initial_dir" "target_dir" = app sorts and copies files from "initial_dir" into "target_dir"
-          move "initial_dir" "target_dir" = app sorts and moves files from "initial_dir" into "target_dir"
-          sort "initial_dir" = app sorts files into "initial_dir" and deletes the initial files''')
-    test_parser.add_argument('script_mode', type=str, help='Choose the mode',
-                             choices=['dryrun', 'copy', 'move', 'sort'])
-    test_parser.add_argument('initial_folder', type=Path, help='Input the initial folder', nargs='?', default=SCRIPT_PATH)
-    test_parser.add_argument('target_folder', type=Path, help='Input the auxiliary folder', nargs='?', default=None)
+    """Simulates parsing of main arguments from CLI."""
+    test_parser = ArgumentParser()
+    test_parser.add_argument('script_mode', type=str, choices=['dryrun', 'copy', 'move', 'sort'])
+    test_parser.add_argument('initial_folder', type=Path, nargs='?')
+    test_parser.add_argument('target_folder', type=Path, nargs='?')
 
     return test_parser.parse_args(input_args)
 
@@ -83,7 +74,7 @@ def get_folder_structure(given_folder: str) -> dict:
 
 
 def sort_dict(input_dict: dict) -> dict:
-    """Return dictionary with sorted values."""
+    """Returns dictionary with sorted values."""
     output_dict = dict()
     for k in sorted(input_dict):
         output_dict[k] = sorted(input_dict[k])
@@ -99,44 +90,56 @@ class ImagesortTest(unittest.TestCase):
         self.reference_report = parse_and_edit_html(CONTROL_REPORT)
         self.test_folder = os_path_join(INITIAL_FOLDER, 'folder_name')
 
-    def test_argparse(self):
-        """Tests argparse module in follow cases:
-        - no mode in arguments
-        - incorrect mode
-        - no required path
-        - no all required paths
-        - incorrect path to initial folder
-        - incorrect path to target folder
-        ."""
+    def test_argparse_no_mode(self):
+        """Test of argparse module, no mode in arguments."""
         no_mode_data = [INITIAL_FOLDER, self.test_folder]
         with self.assertRaises(SystemExit):
             simulate_argparse(no_mode_data)
 
+    def test_argparse_incorrect_mode(self):
+        """Test of argparse module, incorrect mode."""
         incorrect_mode_data = ['incorrect_mode', INITIAL_FOLDER, self.test_folder]
         with self.assertRaises(SystemExit):
             simulate_argparse(incorrect_mode_data)
 
+    def test_argparse_no_path(self):
+        """Test of argparse module, no required path."""
         no_path_data = ['dryrun']
         no_path_args = simulate_argparse(no_path_data)
         with self.assertRaises(imagesort.ArgParsingError):
             imagesort.main(no_path_args)
 
+    def test_argparse_no_all_paths(self):
+        """Test of argparse module, no all required paths."""
         no_all_paths_data = ['move']
         no_all_paths_args = simulate_argparse(no_all_paths_data)
         with self.assertRaises(imagesort.ArgParsingError):
             imagesort.main(no_all_paths_args)
 
+    def test_argparse_incorrect_ini_path(self):
+        """Test of argparse module, initial folder doesn't exist."""
         incorrect_ini_path_data = ['copy', os_path_join(INITIAL_FOLDER, 'error dir'), self.test_folder]
         incorrect_initial_path_args = simulate_argparse(incorrect_ini_path_data)
-        with self.assertRaises(imagesort.FolderNotFoundError):
+        with self.assertRaises(imagesort.InitialFolderNotFoundError):
             imagesort.main(incorrect_initial_path_args)
 
-        incorrect_targ_path_data = ['copy', INITIAL_FOLDER, os_path_join(self.test_folder, 'error dir')]
-        incorrect_target_path_args = simulate_argparse(incorrect_targ_path_data)
-        with self.assertRaises(imagesort.FolderNotFoundError):
+    def test_argparse_incorrect_target_path(self):
+        """Test of argparse module, target folder is relative to initial folder."""
+        incorrect_target_path_data = ['copy', INITIAL_FOLDER, os_path_join(INITIAL_FOLDER, 'new dir', 'folder_1')]
+        incorrect_target_path_args = simulate_argparse(incorrect_target_path_data)
+        with self.assertRaises(imagesort.TargetFolderIsRelativeToInitialFolderError):
             imagesort.main(incorrect_target_path_args)
 
+    def test_target_folder_was_created(self):
+        """Test of creating of the target folder."""
+        with TemporaryDirectory() as temp_dir:
+            test_target_folder = os_path_join(temp_dir, 'folder_1', 'nested_folder', 'test_folder')
+            imagesort.create_target_folder(test_target_folder)
+            if not isdir(test_target_folder):
+                raise TestFailedError('Creating of the target folder')
+
     def test_dryrun_mode(self):
+        """Test of dryrun mode."""
         with TemporaryDirectory() as temp_dir:
             test_data = simulate_argparse(['dryrun', INITIAL_FOLDER, temp_dir])
             imagesort.main(test_data)
@@ -144,7 +147,18 @@ class ImagesortTest(unittest.TestCase):
             if self.reference_report != testing_report:
                 raise TestFailedError('DRY RUN mode')
 
+    def test_dryrun_mode_with_creating_target_folder(self):
+        """Test of dryrun mode with creating of the target folder."""
+        with TemporaryDirectory() as temp_dir:
+            test_target_folder = os_path_join(temp_dir, 'new folder', 'target folder')
+            test_data = simulate_argparse(['dryrun', INITIAL_FOLDER, test_target_folder])
+            imagesort.main(test_data)
+            testing_report = parse_and_edit_html(os_path_join(test_target_folder, 'DryRun report.html'))
+            if self.reference_report != testing_report:
+                raise TestFailedError('DRY RUN mode with creating of the target folder')
+
     def test_copy_mode(self):
+        """Test of copy mode."""
         with TemporaryDirectory() as temp_dir:
             test_data = simulate_argparse(['copy', INITIAL_FOLDER, temp_dir])
             imagesort.main(test_data)
@@ -152,7 +166,18 @@ class ImagesortTest(unittest.TestCase):
             if self.control_structure != testing_structure:
                 raise TestFailedError('COPY mode')
 
+    def test_copy_mode_with_creating_target_folder(self):
+        """Test of copy mode with creating of the target folder."""
+        with TemporaryDirectory() as temp_dir:
+            test_target_folder = os_path_join(temp_dir, 'new folder', 'target folder')
+            test_data = simulate_argparse(['copy', INITIAL_FOLDER, test_target_folder])
+            imagesort.main(test_data)
+            testing_structure = get_folder_structure(test_target_folder)
+            if self.control_structure != testing_structure:
+                raise TestFailedError('COPY mode with creating of the target folder')
+
     def test_move_mode(self):
+        """Test of move mode."""
         with TemporaryDirectory() as temp_dir:
             first_temp_dir = os_path_join(temp_dir, '1')
             second_temp_dir = os_path_join(temp_dir, '2')
@@ -164,7 +189,20 @@ class ImagesortTest(unittest.TestCase):
             if self.control_structure != testing_structure:
                 raise TestFailedError('MOVE mode')
 
+    def test_move_mode_with_creating_target_folder(self):
+        """Test of move mode with creating of the target folder."""
+        with TemporaryDirectory() as temp_dir:
+            first_temp_dir = os_path_join(temp_dir, '1')
+            second_temp_dir = os_path_join(temp_dir, 'new folder', 'target folder')
+            create_initial_folder(INITIAL_FOLDER, first_temp_dir)
+            test_data = simulate_argparse(['move', first_temp_dir, second_temp_dir])
+            imagesort.main(test_data)
+            testing_structure = get_folder_structure(second_temp_dir)
+            if self.control_structure != testing_structure:
+                raise TestFailedError('MOVE mode with creating of the target folder')
+
     def test_sort_mode(self):
+        """Test of sort mode."""
         test_data = simulate_argparse(['sort', INITIAL_FOLDER])
         imagesort.main(test_data)
         testing_structure = get_folder_structure(INITIAL_FOLDER)
@@ -172,7 +210,10 @@ class ImagesortTest(unittest.TestCase):
             raise TestFailedError('SORT mode')
 
     def tearDown(self):
-        imagesort.delete_folder(INITIAL_FOLDER)
+        try:
+            imagesort.delete_folder(INITIAL_FOLDER)
+        except Exception as err:
+            sys_exit(f"Error! Testing failed, tearDown() raised the exception: {err}")
 
 
 if __name__ == '__main__':
