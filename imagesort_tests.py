@@ -2,13 +2,13 @@ from argparse import ArgumentParser
 from bs4 import BeautifulSoup
 from os import walk as os_walk
 from os import mkdir
-from os.path import abspath, dirname, isdir
+from os.path import abspath, dirname, isdir, isfile
 from os.path import join as os_path_join
 from pathlib import Path
 from shutil import copytree
 from sys import exit as sys_exit
 from tempfile import TemporaryDirectory
-from ims_test_errors import TestFailedError
+from tests.errors import TestDataNotFoundError, TestFailedError
 import imagesort
 import json
 import unittest
@@ -17,11 +17,22 @@ import argparse
 
 SCRIPT_PATH = abspath(dirname(__file__))
 BASE_DIR = Path(__file__).resolve().parent
-CONTROL_REPORT = os_path_join(BASE_DIR, 'reference report and structure', 'control report.html')
-CONTROL_STRUCTURE = os_path_join(BASE_DIR, 'reference report and structure', 'control structure.json')
+TEST_DIR = os_path_join(BASE_DIR, 'tests')
+CONTROL_REPORT = os_path_join(TEST_DIR, 'reference report and structure', 'control report.html')
+CONTROL_STRUCTURE = os_path_join(TEST_DIR, 'reference report and structure', 'control structure.json')
 
-TEMP_FOLDER = os_path_join(BASE_DIR, 'unsorted')
-INITIAL_FOLDER = os_path_join(BASE_DIR, 'test INI DIR')
+TEMP_FOLDER = os_path_join(TEST_DIR, 'unsorted')
+INITIAL_FOLDER = os_path_join(TEST_DIR, 'test INI DIR')
+
+
+def check_test_files_and_dir() -> None:
+    """Checks test files and directory for existing."""
+    if not isfile(CONTROL_REPORT):
+        raise TestDataNotFoundError('File "control report.html"')
+    if not isfile(CONTROL_STRUCTURE):
+        raise TestDataNotFoundError('File "control structure.json"')
+    if not isdir(TEMP_FOLDER):
+        raise TestDataNotFoundError('Directory "unsorted"')
 
 
 def simulate_argparse(input_args: list) -> 'argparse.Namespace':
@@ -85,6 +96,7 @@ def sort_dict(input_dict: dict) -> dict:
 class ImagesortTest(unittest.TestCase):
     """Tests argparse module (for parsing different incorrect arguments) and each mode."""
     def setUp(self):
+        check_test_files_and_dir()
         create_initial_folder(TEMP_FOLDER, INITIAL_FOLDER)
         self.control_structure = get_reference_data()
         self.reference_report = parse_and_edit_html(CONTROL_REPORT)

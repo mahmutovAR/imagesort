@@ -10,8 +10,8 @@ from shutil import copy as shutil_copy
 from shutil import rmtree
 from stat import S_IWRITE
 from sys import exit as sys_exit
-from ims_class import ImageAttributes
-from ims_errors import ArgParsingError, ChecksumVerificationError,\
+from image_att.image_attributes import ImageAttributes
+from errors import ArgParsingError, ChecksumVerificationError,\
     InitialFolderNotFoundError, NoFilesToSortError, TargetFolderIsRelativeToInitialFolderError
 
 
