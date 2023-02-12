@@ -1,344 +1,341 @@
+from argparse import ArgumentParser, RawDescriptionHelpFormatter
+from hashlib import sha256
+from os import chmod, mkdir, remove, rename
+from os import walk as os_walk
+from os.path import abspath, dirname, isdir, isfile, normpath, splitext
+from os.path import join as os_path_join
+from pathlib import Path
+from shutil import copy as shutil_copy
+from shutil import rmtree
+from stat import S_IWRITE
+from sys import exit as sys_exit
+
 from chameleon import PageTemplateLoader
-from PIL import Image
-import argparse
-import copy
-import hashlib
-import os
-import pathlib
-import shutil
-import stat
-import sys
+
+from errors import ArgParsingError, ChecksumVerificationError, \
+    InitialFolderNotFoundError, NoFilesToSortError, TargetFolderIsRelativeToInitialFolderError
+from image_att.image_attributes import ImageAttributes
+
+SCRIPT_PATH = abspath(dirname(__file__))
+SHA256_BLOCK_SIZE = 65536
 
 
-def create_directories_structure(initial_folder: str) -> dict and list:
+def parse_main_args() -> 'argparse.Namespace':
+    """The argparse module returns ArgumentParser object with main data from CLI."""
+    parser = ArgumentParser(prog='ImageSort',
+                            usage='imagesort.py [-h] [script_mode, initial_folder, target_folder]',
+                            formatter_class=RawDescriptionHelpFormatter,
+                            description='''
+        %(prog)s sorts images by their resolutions.
+        Reference information about application:
+          dryrun "initial_dir" "report_dir" = app sorts files from "ini_dir" and generates html report in "report_dir"
+          copy "initial_dir" "target_dir" = app sorts and copies files from "initial_dir" into "target_dir"
+          move "initial_dir" "target_dir" = app sorts and moves files from "initial_dir" into "target_dir"
+          sort "initial_dir" = app sorts files into "initial_dir" and deletes the initial files''')
+    parser.add_argument('script_mode', type=str, help='Choose the mode',
+                        choices=['dryrun', 'copy', 'move', 'sort'])
+    parser.add_argument('initial_folder', type=Path, help='Input the initial folder', nargs='?', default=None)
+    parser.add_argument('target_folder', type=Path, help='Input the target folder', nargs='?', default=None)
+    return parser.parse_args()
+
+
+def get_global_variables(CLI_data: 'argparse.Namespace') -> None:
+    """Returns global variables (MODE, INITIAL FOLDER, TARGET FOLDER) from ArgumentParser object."""
+    global MODE, INITIAL_FOLDER, TARGET_FOLDER
+    MODE = CLI_data.script_mode
+    INITIAL_FOLDER = convert_path_to_str(CLI_data.initial_folder)
+    if not isdir(INITIAL_FOLDER):
+        raise InitialFolderNotFoundError(INITIAL_FOLDER)
+
+    if MODE == 'sort':
+        TARGET_FOLDER = create_temporary_folder()
+    else:
+        TARGET_FOLDER = convert_path_to_str(CLI_data.target_folder)
+        check_target_folder_to_be_out_of_initial_folder(INITIAL_FOLDER, TARGET_FOLDER)
+        create_target_folder(TARGET_FOLDER)
+
+
+def convert_path_to_str(input_data: 'pathlib.PosixPath') -> str:
+    """Converts 'pathlib.PosixPath' object to the string and returns path if directory exists.
+    If 'pathlib.PosixPath' object is None then the ArgParsingError is raised.
+    If directory doesn't exist then the FolderNotFoundError is raised."""
+    if not input_data:
+        raise ArgParsingError
+    output_path = str(input_data)
+    return normpath(output_path)
+
+
+def check_target_folder_to_be_out_of_initial_folder(initial_folder: str, target_folder: str) -> None:
+    """Checks the target folder to be out of the initial folder."""
+    initial_dir = normpath(initial_folder)
+    target_dir = normpath(target_folder)
+    initial_dir = Path(initial_dir)
+    target_dir = Path(target_dir)
+    if target_dir.is_relative_to(initial_dir):
+        raise TargetFolderIsRelativeToInitialFolderError(initial_folder, target_folder)
+
+
+def create_target_folder(given_path: str) -> None:
+    """Creates target folder"""
+    path_in_list = given_path.split('/')
+    for cnt, path_part in enumerate(path_in_list, 1):
+        folder_to_create = normpath('/'.join(path_in_list[:cnt]))
+        if not isdir(folder_to_create):
+            try:
+                mkdir(folder_to_create)
+            except PermissionError as err:
+                sys_exit(f'\nAttention! Creating of the "{folder_to_create}" raised the PermissionError: {err}')
+
+
+def get_files_to_sort_from_initial_dir() -> list and dict:
+    """Returns list of objects FileAttributes class."""
+    all_files_from_ini_folder, ini_dir_structure = get_all_files_from_folder(INITIAL_FOLDER)
+
+    initial_files_to_sort = [ImageAttributes(file_to_sort)
+                             for file_to_sort in all_files_from_ini_folder]
+
+    return initial_files_to_sort, ini_dir_structure
+
+
+def get_all_files_from_folder(given_folder: str) -> list and dict:
+    """Returns list of paths of all files from given directory and full structure of the given directory.
+    full_paths_from_dir = ['full_path_to_the_file_1', 'full_path_to_the_file_2', etc.]
+    dir_structure = {'full_path_to_the_folder_1': ['file_name_1', 'file_name_2', etc.], etc.}
     """
-    Checks the initial folder for existing. Gets structure of the initial folder as dictionary and list:
-    ini_structure = {'full_path_to_folder_1': ['file_name_1', 'file_name_2', __], __}
-    all_files = ['full_path_to_file_1', 'full_path_to_the_file_2', __]
-
-    Gets the structure of target folder, resolutions are defined for images
-    and status 'Not images' is given for other files.
-    Output dictionaries are:
-    files_attributes = {'full_path_to_file_1': ['folder_name'*, 'file_name_1'], __}
-    dir_structure = {'folder_name'*: ['file_name_1', 'file_name_2', __], __}
-    * were 'folder_name' is resolution (for example, '1920x1080') or 'Not images'
-    """
-    if not os.path.isdir(initial_folder):
-        sys.exit(f"Error! Entered initial folder doesn't exist: {initial_folder}")
-
-    os.chdir(initial_folder)
-    all_files, ini_structure = get_dirs_and_files(initial_folder)
-
-    files_attributes = dict()
-
-    for single_file in all_files:
-        try:
-            w, h = Image.open(single_file).size
-        except:
-            files_attributes[single_file] = ['Not images', os.path.basename(single_file)]
-        else:
-            files_attributes[single_file] = [f'{w}x{h}', os.path.basename(single_file)]
-
+    full_paths_from_dir = list()
     dir_structure = dict()
-    dirs_set = set([folder_name[0]
-                    for folder_name in files_attributes.values()])
+    for dir_path, dir_name, files_in_dir in os_walk(given_folder):
+        for file in files_in_dir:
+            full_paths_from_dir.append(os_path_join(dir_path, file))
+        if files_in_dir:
+            dir_structure[f"""{dir_path.replace(given_folder, '"root dir" ')}"""] = files_in_dir
 
-    for folder_name in dirs_set:
-        temp_list = list()
-        for attributes in files_attributes.values():
-            if attributes[0] == folder_name:
-                temp_list.append(attributes[1])
-            dir_structure[folder_name] = temp_list
-
-    if len(dir_structure.keys()) == 1 and 'Not images' in dir_structure.keys():
-        sys.exit('Error! There are no images to sort in the initial folder: {initial_folder}')
-
-    if 'Not images' in dir_structure.keys():
-        print(f"Information! There is(are) file(s) in the initial folder for which resolution couldn't "
-              f'be determined so directory "Not images" will be created.\n')
-
-    return ini_structure, files_attributes, dir_structure
+    if not full_paths_from_dir:
+        raise NoFilesToSortError(given_folder)
+    else:
+        return full_paths_from_dir, dir_structure
 
 
-def process_mode_dry_run(script_path: str, initial_folder: str,
-                         ini_structure: dict, dir_structure: dict) -> 'html report':
-    """Generates the html report which will show previous structure and suggested reorganization.
-    initial_structure = {'path_to_folder_1': ['file_name_1', 'file_name_2', __], __}
-    sorted_output_files = {'folder_name'*: ['file_name_1', 'file_name_2', __], __}
-    * were 'folder_name' is resolution (for example, '1920x1080') or 'Not images'
+def define_resolution_for_each_image(ini_files_attributes: list) -> None:
+    """Runs function "get_resolution_of_image" of the class ImageAttributes for each file from initial folder."""
+    for file_to_sort in ini_files_attributes:
+        file_to_sort.define_image_resolution()
+
+
+def generate_html_report(initial_files: list, files_before_sorting: dict) -> 'html report':
+    """Generates the html report which shows current structure and suggested reorganization.
+    The html report will be created in the given directory.
     """
-    report_name = check_dryrun_report_name(initial_folder)
+    html_report_name = choose_name_for_html_report(TARGET_FOLDER)
 
-    initial_structure = dict()
-    for path in ini_structure.keys():
-        initial_structure[f"""{path.replace(initial_folder, '"root dir"')}"""] = ini_structure[path]
+    files_after_sorting = dict()
+    for file_to_sort in initial_files:
+        file_name = file_to_sort.get_file_name()
+        folder_name = file_to_sort.get_image_resolution()
+        if folder_name not in files_after_sorting.keys():
+            files_after_sorting[folder_name] = list()
+        files_after_sorting[folder_name].append(file_name)
 
     sorted_output_files = dict()
-    for folder in sorted(dir_structure):
-        sorted_output_files[folder] = sorted(dir_structure[folder])
+    for folder_name in sorted(files_after_sorting):
+        sorted_output_files[folder_name] = sorted(files_after_sorting[folder_name])
 
     try:
-        templates = PageTemplateLoader(os.path.join(script_path, "templates"))
+        templates = PageTemplateLoader(os_path_join(SCRIPT_PATH, "templates"))
         tmpl = templates['report_temp.pt']
-        result_html = tmpl(title=report_name, input_folder=initial_folder,
-                           initial_dir=initial_structure, structure=sorted_output_files)
+
+        data_for_html = tmpl(title=html_report_name, input_folder=INITIAL_FOLDER,
+                             initial_dir=files_before_sorting, structure=sorted_output_files)
     except Exception as err:
-        print(f'The HTML report generation caused the exception:\n\t{err}')
+        sys_exit(f'\nThe HTML report generation raised the exception:\n{err}')
     else:
-        report = open(os.path.join(initial_folder, report_name), 'w')
-        report.write(result_html)
+        report = open(os_path_join(TARGET_FOLDER, html_report_name), 'w')
+        report.write(data_for_html)
         report.close()
-        print(f'The file "{report_name}" was created in the directory "{initial_folder}"')
+        print(f'\nThe file "{html_report_name}" was created in the directory "{TARGET_FOLDER}"')
 
 
-def sort_images(target_folder: str, files_attributes: dict) -> None:
-    """Creates new folders (Width x Height) or 'Not images' and copies images from initial folder to the new,
-    if folder already exists files will be added there, if there is file with the same name,
-    then the new file will be renamed, "({num})" will be added to its name (for example, "wallpaper(3)").
-    """
-    os.chdir(target_folder)
-    temp_dict = copy.deepcopy(files_attributes)
-    for full_path, attributes in temp_dict.items():
-        check_dir_before_making(attributes[0])
-        checked_file_name = check_file_before_coping(full_path, target_folder, files_attributes)
-        shutil.copy(full_path, os.path.join(target_folder, attributes[0], checked_file_name))
-
-
-def validate_checksums(target_folder: str, files_attributes: dict) -> 'terminal report':
-    """Compares checksums of the files from initial folder and copied files after reorganization.
-    ini_files_checksums = ['checksum_of_file_1', 'checksum_of_file_2', __]  # for all files from initial_folder
-    res_files_checksums = ['checksum_of_file_1', 'checksum_of_file_2', __]  # for copied files from target_folder
-    """
-    ini_files_checksums = list()
-    res_files_checksums = list()
-    for file_path, attributes in files_attributes.items():
-        ini_files_checksums.append(calculate_checksums(file_path))
-        res_files_checksums.append(calculate_checksums(os.path.join(target_folder, attributes[0], attributes[1])))
-
-    ini_files_checksums.sort()
-    res_files_checksums.sort()
-
-    if ini_files_checksums == res_files_checksums:
-        print('Checksum verification completed successfully')
-    else:
-        sys.exit('Attention! Checksum verification completed with an error. Deleting of the initial files canceled.')
-
-    total_ini_files = len(files_attributes.keys())
-    total_images = 0
-    total_not_images = 0
-    for attributes in files_attributes.values():
-        if attributes[0] == 'Not images':
-            total_not_images += 1
-        else:
-            total_images += 1
-
-    print(f'\nImageSort report:\nFrom initial folder was(re) sorted successfully {total_ini_files} files:\n'
-          f'Images{total_images:>20}\n'
-          f'Not images{total_not_images:>16}')
-
-
-def remove_initial_files(script_path: str, initial_folder: str) -> None:
-    """Removes all files from given folder even with attribute "readonly"."""
-    os.chdir(script_path)
-    try:
-        shutil.rmtree(initial_folder, onerror=delete_readonly)
-    except PermissionError as err:
-        sys.exit(f'Attention! Deleting of the initial folder completed with an error: {err}'
-                 f'\nPlease close the folder in explorer or another application and try again')
-    except Exception as err:
-        sys.exit(f'Attention! Deleting of the initial folder completed with an error: {err}')
-
-
-def create_temp_folder(initial_folder: str) -> str:
-    """Creates temporary folder for coping sorted files."""
-    only_path = os.path.dirname(initial_folder)
-    num = 1
-    while os.path.isdir(f'{only_path}-temp{num}'):
-        num += 1
-    temp_folder = f'{initial_folder}-temp{num}'
-    os.mkdir(temp_folder)
-    return temp_folder
-
-
-def check_dryrun_report_name(initial_folder: str) -> str:
-    """Checks initial folder for existing file 'DryRun report.html', if file already exists then
+def choose_name_for_html_report(given_folder: str) -> str:
+    """Checks given folder for existing file 'DryRun report.html', if file already exists then
     the report will be renamed before generating, "({num})" will be added to its name."""
-    if os.path.isfile(os.path.join(initial_folder, 'DryRun report.html')):
+    if isfile(os_path_join(given_folder, 'DryRun report.html')):
         num = 1
-        while os.path.isfile(os.path.join(initial_folder, f'DryRun report({num}).html')):
+        while isfile(os_path_join(given_folder, f'DryRun report({num}).html')):
             num += 1
         return f'DryRun report({num}).html'
     else:
         return 'DryRun report.html'
 
 
-def rename_target_folder(script_path: str, initial_folder: str, target_folder: str) -> None:
-    """Renames temporary target folder into initial folder."""
-    os.chdir(script_path)
-    os.rename(target_folder, initial_folder)
-
-
-def delete_readonly(action, name, exc) -> None:
-    """Deletes files with attribute "readonly"."""
-    os.chmod(name, stat.S_IWRITE)
-    os.remove(name)
-
-
-def calculate_checksums(file_path: str) -> str:
-    """Returns checksum of the given file."""
-    block_size = 65536
-    sha = hashlib.sha256()
-    with open(file_path, 'rb') as CF:
-        file_buffer = CF.read(block_size)
-        while len(file_buffer) > 0:
-            sha.update(file_buffer)
-            file_buffer = CF.read(block_size)
-    return sha.hexdigest()
-
-
-def check_file_before_coping(file_to_copy: str, target_folder: str, input_dict: dict) -> str:
-    """Checks folder for existing file with given name,
-    if file already exists then the new file will be renamed before coping:
-    "({num})" will be added to its name (for example, "wallpaper(3)").
+def sort_and_copy_files(initial_files: list) -> None:
+    """Creates new folders (Width x Height) or 'Not images' and copies files from initial folder to the new one,
+    if folder already exists files will be added there, if there is file with the same name,
+    then the new file will be renamed, "({num})" will be added to its name (for example, "wallpaper(3)").
     """
-    dir_name = input_dict[file_to_copy][0]
-    file_name = input_dict[file_to_copy][1]
-    existing_file = os.path.join(target_folder, dir_name, file_name)
-    only_name, only_type = os.path.splitext(file_name)
-    if os.path.isfile(existing_file):
+    for file_from_ini_dir in initial_files:
+        initial_file_path = file_from_ini_dir.get_initial_file_path()
+        initial_file_name = file_from_ini_dir.get_file_name()
+        image_resolution = file_from_ini_dir.get_image_resolution()
+        create_dir_if_not_exists(os_path_join(TARGET_FOLDER, image_resolution))
+        file_to_sort = get_path_for_sorted_file(initial_file_name, image_resolution)
+        file_from_ini_dir.set_sorted_file_path(file_to_sort)
+        shutil_copy(initial_file_path, file_to_sort)
+
+
+def get_path_for_sorted_file(file_name: str, folder_name: str) -> str:
+    """Returns file name for sorted file in target folder.
+    If file with the same name already exists, then the new file will be renamed:
+    "({number})" will be added to its name (for example, "wallpaper(3)")."""
+    sorted_file_path = os_path_join(TARGET_FOLDER, folder_name, file_name)
+    if isfile(sorted_file_path):
         num = 1
-        while os.path.isfile(os.path.join(target_folder, dir_name, f'{only_name}({num}){only_type}')):
+        file_path_without_type, file_type = splitext(sorted_file_path)
+        while isfile(os_path_join(f'{file_path_without_type}({num}){file_type}')):
             num += 1
-        input_dict[file_to_copy][1] = f'{only_name}({num}){only_type}'
-        return f'{only_name}({num}){only_type}'
+        new_sorted_file_path = f'{file_path_without_type}({num}){file_type}'
+        return new_sorted_file_path
     else:
-        return file_name
+        return sorted_file_path
 
 
-def get_dirs_and_files(input_folder: str) -> dict and list:
-    """Gets full structure of the given path.
-    dir_structure = {'full_path_to_the_folder_1': ['file_name_1', 'file_name_2', ], }
-    """
-    paths_structure = list()
-    dir_structure = dict()
-    for dirpath, dirs, files in os.walk(f'{input_folder}'):
-        temp_list = list()
-        for file_name in os.listdir(dirpath):
-            if not os.path.isdir(os.path.join(dirpath, file_name)):
-                paths_structure.append(os.path.join(dirpath, file_name))
-                temp_list.append(file_name)
-            dir_structure[dirpath] = temp_list
-
-    if not paths_structure:
-        sys.exit(f'Error! There are no files in the initial folder: {input_folder}')
-    else:
-        return paths_structure, delete_empty_folders(dir_structure)
+def create_dir_if_not_exists(given_path: str) -> None:
+    """Makes directory if it doesn't exist."""
+    if not isdir(given_path):
+        mkdir(given_path)
 
 
-def delete_empty_folders(input_dict: dict) -> dict:
-    """Deletes in inputted dictionary paths for empty folders."""
-    dict_copy = copy.deepcopy(input_dict)
-    for folder_name in dict_copy.keys():
-        if not input_dict[folder_name]:
-            del input_dict[folder_name]
-    return input_dict
+def integrity_validation(ini_files_attributes: list) -> None:
+    """Compares checksums of each file from initial folder and copied files after reorganization.
+    Displays information about amount of sorted files."""
+    total_ini_files = len(ini_files_attributes)
+    total_images = 0
+    total_not_images = 0
+    for file_to_sort in ini_files_attributes:
+        initial_file = file_to_sort.get_initial_file_path()
+        sorted_file = file_to_sort.get_sorted_file_path()
+        if get_checksum(initial_file) != get_checksum(sorted_file):
+            raise ChecksumVerificationError
+        if file_to_sort.get_image_resolution() == 'Not images':
+            total_not_images += 1
+        else:
+            total_images += 1
+    print(f'\nChecksum verification completed successfully\n'
+          f'From initial folder was(re) sorted successfully {total_ini_files} files:\n'
+          f'Images{total_images:>20}\n'
+          f'Not images{total_not_images:>16}')
 
 
-def check_dir_before_making(input_path: str) -> None:
-    """Checks if the given directory exists, otherwise creates a new one."""
-    if not os.path.isdir(input_path):
-        os.mkdir(input_path)
+def get_checksum(file_path: str) -> str:
+    """Returns checksum of the given file."""
+    sha_hashing = sha256()
+    with open(file_path, 'rb') as CF:
+        file_buffer = CF.read(SHA256_BLOCK_SIZE)
+        while len(file_buffer) > 0:
+            sha_hashing.update(file_buffer)
+            file_buffer = CF.read(SHA256_BLOCK_SIZE)
+    return sha_hashing.hexdigest()
 
 
-def main():
+def delete_folder(folder_for_deleting: str) -> None:
+    """Deletes given folder with all nested folder(s) and file(s)."""
+    try:
+        rmtree(folder_for_deleting, onerror=delete_readonly_file)
+    except PermissionError as err:
+        sys_exit(f'\nAttention! Deleting of the "{folder_for_deleting}" raised the exception: {err}'
+                 f'\nPlease close the folder in explorer or another application and try again')
+    except Exception as err:
+        sys_exit(f'\nAttention! Deleting of the "{folder_for_deleting}" raised the exception: {err}')
+
+
+def delete_readonly_file(action, name, exc) -> None:
+    """Deletes files with attribute "readonly"."""
+    chmod(name, S_IWRITE)
+    remove(name)
+
+
+def create_temporary_folder() -> str:
+    """Creates temporary folder for coping sorted files."""
+    temp_target_folder = os_path_join(dirname(INITIAL_FOLDER), 'ImageSort temp folder')
+    if isdir(temp_target_folder):
+        num = 1
+        while isdir(os_path_join(INITIAL_FOLDER, f'ImageSort temp folder({num})')):
+            num += 1
+        temp_target_folder = os_path_join(INITIAL_FOLDER, f'ImageSort temp folder({num})')
+    mkdir(temp_target_folder)
+    return temp_target_folder
+
+
+def rename_temp_folder_to_initial() -> None:
+    """Renames temporary target folder into initial folder."""
+    rename(TARGET_FOLDER, INITIAL_FOLDER)
+
+
+def main(CLI_data: 'argparse.Namespace'):
     """This is the main function of the script.
-    Firstly, full path to the "imagesort.py" is given.
+    Firstly, global variables are defined:
+    - full path to the "imagesort.py"
+    - block size for getting checksum (SHA256)
     Secondly, main arguments are defined from the command line by using argparse module:
-        mode ('dryrun', 'copy', 'move', 'sort')
-        initial folder (full path)
-        target folder (full path)
-    After thees blocks function 'create_directories_structure' is executed for all types of the mode
+        parse_main_args() returns argparse.Namespace object
+        get_global_variables(CLI_data) returns:
+            mode ('dryrun', 'copy', 'move', 'sort')
+            initial folder (full path)
+            target folder (full path)
 
-    For 'dryrun' is executed:
-        process_mode_dry_run
-    For 'copy' are executed next functions:
-        sort_images
-        validate_checksums
-    For 'move' are executed next functions:
-        sort_images
-        validate_checksums
-        remove_initial_files
-    For 'sort' are executed next functions:
-        create_temp_folder
-        sort_images
-        validate_checksums
-        remove_initial_files
-        rename_target_folder
+    After thees blocks are executed next functions:
+    - get_files_to_sort_from_initial_dir()
+    - define_resolution_for_each_image(initial_files_to_sort)
 
-    Extra functions are also used:
-        calculate_checksums
-        check_dryrun_report_name
-        check_file_before_coping
-        check_dir_before_making
-        delete_empty_folders
-        delete_readonly
-        get_dirs_and_files
+    For 'dryrun' mode is executed:
+        generate_html_report()
+    For 'copy' mode are executed next functions:
+        copy_sorted_files()
+        integrity_validation()
+    For 'move' mode are executed next functions:
+        copy_sorted_files()
+        integrity_validation()
+        delete_folder()
+    For 'sort' mode are executed next functions:
+        create_temporary_folder()
+        copy_sorted_files()
+        integrity_validation()
+        delete_folder()
+        rename_temp_folder_to_initial()
     """
-    script_path = os.path.abspath(os.path.dirname(__file__))  # path to the imagesort.py
 
-    parser = argparse.ArgumentParser(prog='ImageSort',
-                                     usage='imagesort.py [-h] [mode, initial_folder, target_folder (optional)]',
-                                     formatter_class=argparse.RawDescriptionHelpFormatter,
-                                     description='''
-    %(prog)s sorts images by their resolutions.
-    Reference information about application:
-      dryrun "path" = app generates html-report with sorted files structure from inputted folder
-      copy "path_1" "path_2" = app sorts files from "directory_1" into "directory_2"
-      move "path_1" "path_2" = app sorts and moves files from "directory_1" into "directory_2"
-      sort "path" = app sorts files into the inputted folder and deletes the initial files''')
-    parser.add_argument('mode', type=str, help='Choose the mode',
-                        choices=['dryrun', 'copy', 'move', 'sort'])
-    parser.add_argument('initial_folder', type=pathlib.Path, help='Input the initial folder', nargs='?', default=None)
-    parser.add_argument('target_folder', type=pathlib.Path, help='Input the target folder', nargs='?', default=None)
+    get_global_variables(CLI_data)
+    initial_files_to_sort, initial_dir_structure = get_files_to_sort_from_initial_dir()
+    define_resolution_for_each_image(initial_files_to_sort)
 
-    input_args = parser.parse_args()
-    initial_folder = str(input_args.initial_folder)
-    target_folder = str(input_args.target_folder)
-    mode = input_args.mode
-
-    ini_structure, files_attributes, dir_structure = create_directories_structure(initial_folder)
-
-    if mode == 'dryrun':
-        process_mode_dry_run(script_path, initial_folder, ini_structure, dir_structure)
-    elif mode == 'copy':
-        process_mode_copy(target_folder, files_attributes)
-    elif mode == 'move':
-        process_mode_move(script_path, initial_folder, target_folder, files_attributes)
-    else:  # elif mode == 'sort':
-        process_mode_sort(script_path, initial_folder, files_attributes)
+    if MODE == 'dryrun':
+        generate_html_report(initial_files_to_sort, initial_dir_structure)
+    elif MODE == 'copy':
+        process_mode_copy(initial_files_to_sort)
+    elif MODE == 'move':
+        process_mode_move(initial_files_to_sort)
+    else:  # MODE == 'sort':
+        process_mode_sort(initial_files_to_sort)
 
 
 # mode function definitions:
-def process_mode_copy(target_folder, files_attributes):
-    check_dir_before_making(target_folder)
-    sort_images(target_folder, files_attributes)
-    validate_checksums(target_folder, files_attributes)
+def process_mode_copy(initial_files):
+    sort_and_copy_files(initial_files)
+    integrity_validation(initial_files)
 
 
-def process_mode_move(script_path, initial_folder, target_folder, files_attributes):
-    check_dir_before_making(target_folder)
-    sort_images(target_folder, files_attributes)
-    validate_checksums(target_folder, files_attributes)
-    remove_initial_files(script_path, initial_folder)
+def process_mode_move(initial_files):
+    sort_and_copy_files(initial_files)
+    integrity_validation(initial_files)
+    delete_folder(INITIAL_FOLDER)
 
 
-def process_mode_sort(script_path, initial_folder, files_attributes):
-    target_folder = create_temp_folder(initial_folder)
-    sort_images(target_folder, files_attributes)
-    validate_checksums(target_folder, files_attributes)
-    remove_initial_files(script_path, initial_folder)
-    rename_target_folder(script_path, initial_folder, target_folder)
+def process_mode_sort(initial_files):
+    sort_and_copy_files(initial_files)
+    integrity_validation(initial_files)
+    delete_folder(INITIAL_FOLDER)
+    rename_temp_folder_to_initial()
 
 
 if __name__ == '__main__':
-    main()
+    CLI_data = parse_main_args()
+    main(CLI_data)

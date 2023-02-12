@@ -1,0 +1,15 @@
+For 'dryrun' mode is executed:
+    generate_html_report()
+For 'copy' mode are executed next functions:
+    copy_sorted_files()
+    integrity_validation()
+For 'move' mode are executed next functions:
+    copy_sorted_files()
+    integrity_validation()
+    delete_folder()
+For 'sort' mode are executed next functions:
+    create_temporary_folder()
+    copy_sorted_files()
+    integrity_validation()
+    delete_folder()
+    rename_temp_folder_to_initial()
