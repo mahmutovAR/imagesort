@@ -3,7 +3,7 @@ class TestFailedError(Exception):
 
     def __init__(self, test_name):
         self.__test_name = test_name
-        self.__description = f'Error! Test {test_name} failed.'
+        self.__description = f'Error! The unit test failed. Problem with {test_name}.'
 
     def __str__(self):
         return f'{self.__description}'

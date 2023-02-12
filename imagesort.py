@@ -1,5 +1,4 @@
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
-from chameleon import PageTemplateLoader
 from hashlib import sha256
 from os import chmod, mkdir, remove, rename
 from os import walk as os_walk
@@ -10,12 +9,13 @@ from shutil import copy as shutil_copy
 from shutil import rmtree
 from stat import S_IWRITE
 from sys import exit as sys_exit
-from image_att.image_attributes import ImageAttributes
-from errors import ArgParsingError, ChecksumVerificationError,\
+
+from chameleon import PageTemplateLoader
+
+from errors import ArgParsingError, ChecksumVerificationError, \
     InitialFolderNotFoundError, NoFilesToSortError, TargetFolderIsRelativeToInitialFolderError
+from image_att.image_attributes import ImageAttributes
 
-
-# global variables:
 SCRIPT_PATH = abspath(dirname(__file__))
 SHA256_BLOCK_SIZE = 65536
 
