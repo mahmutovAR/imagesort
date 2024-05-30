@@ -13,11 +13,26 @@ All images from the nested directories in the initial folder will be sorted too.
 * files for which resolution couldn't be determined will be copied or moved to the directory "Not images" in the target folder.
 
 
+## Installation
+**Requirements**
+* `Python` 3.9+ (tested to work with == 3.12.3)  
+* `Chameleon` (tested to work with == 4.5.2) 
+* `argparse` (tested to work with == 1.4.0)  
+* `beautifulsoup4` (tested to work with == 4.12.3)  
+* `lxml` (tested to work with == 5.2.2)  
+* `pillow` (tested to work with == 10.3.0) 
+
+
+**Note:** The packages can be installed by running `python3 -m pip install -r requirements.txt`
+***
+
+
 ## To run script:
 * `imagesort.py dryrun "initial_dir" "report_dir"` sorts files from "ini_dir" and generates html report in "report_dir"
 * `imagesort.py copy "initial_dir" "target_dir"` sorts and copies files from "initial_dir" into "target_dir"
 * `imagesort.py move "initial_dir" "target_dir"` sorts and moves files from "initial_dir" into "target_dir"
 * `imagesort.py sort "initial_dir"` sorts files into "initial_dir" and deletes the initial files
+
 
 ### Files and directories:
 * `imagesort.py` script for sorting images by resolutions
@@ -30,11 +45,3 @@ All images from the nested directories in the initial folder will be sorted too.
 * * `control report.html` reference html report for testing
 * * `control structure.json` json file with reference directory structure for testing
 - `./tests/unsorted` directory with files for testing
-
-## Script runs on Python 3.9, with next modules:
-* `hashlib`, `os`, `pathlib`, `shutil`, `stat`, `sys` (standard libraries)
-* `argparse`, `Chameleon`, `Pillow`  (3rd party libraries)
-
-### Test of ImageSort runs with next modules:
-* `json`,`tempfile`, `unittest` (standard libraries)
-* `bs4` (3rd party library)

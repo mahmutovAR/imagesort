@@ -105,6 +105,7 @@ def get_all_files_from_folder(given_folder: str) -> list and dict:
     full_paths_from_dir = list()
     dir_structure = dict()
     for dir_path, dir_name, files_in_dir in os_walk(given_folder):
+        files_in_dir.sort()
         for file in files_in_dir:
             full_paths_from_dir.append(os_path_join(dir_path, file))
         if files_in_dir:
