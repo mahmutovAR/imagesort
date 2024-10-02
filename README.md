@@ -23,7 +23,7 @@ python3 -m pip install -r requirements.txt
 ***
 
 
-## Run script
+## Run ImageSort
 To sort files from initial dir and generate html report run
 ```commandline
 imagesort.py dryrun "path/to/initial/dir" "path/to/report/dir"
@@ -46,7 +46,7 @@ imagesort.py sort "path/to/initial/dir"
 ***
 
 
-## To test script run
+## To test ImageSort run
 ```commandline
 pytest
 ```
