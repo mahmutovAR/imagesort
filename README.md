@@ -55,7 +55,7 @@ pytest
 
 ### Files and directories:
 * `./errors` package with exceptions for the main script  
-* `./image_att` sorting files module
+- `./image_att` sorting files module
 * `./templates` templates directory
 - `./tests` tests module
 * `imagesort.py` script for sorting images by resolutions
